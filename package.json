@@ -39,7 +39,7 @@
 		"jquery": "^3.6.0",
 		"localforage": "^1.10.0",
 		"lodash.merge": "^4.6.2",
-		"three": "https://github.com/snagy/three.js-1.git#r144-merge#6fc27ea",
+		"three": "https://github.com/snagy/three.js-1.git#r144-merge",
 		"three-instanced-uniforms-mesh": "^0.46.0",
 		"three-mesh-bvh": "^0.5.16",
 		"three-mesh-ui": "^6.5.2",

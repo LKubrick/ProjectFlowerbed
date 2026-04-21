@@ -2960,9 +2960,9 @@ three-mesh-ui@^6.5.2:
   resolved "https://registry.yarnpkg.com/three-mesh-ui/-/three-mesh-ui-6.5.2.tgz#2ce40ea8a0274512c267e52eee24db512bc4cccc"
   integrity sha512-rx8J2YonD5WvhqkpE4vQMtEn/x50koY6xqKDOf6x8Yt8CeEdDVuQjH8h7vFg1t8oZI/yIJUylTbtut6Ew4zc9g==
 
-"three@https://github.com/snagy/three.js-1.git#r144-merge#6fc27ea":
+"three@https://github.com/snagy/three.js-1.git#r144-merge":
   version "0.144.0"
-  resolved "https://github.com/snagy/three.js-1.git#6fc27ea0e5d957003b623d72c7766e9b1be5c3af"
+  resolved "https://github.com/snagy/three.js-1.git#cec4d3307f58465e59cedae11f76f7b78c27146d"
 
 thunky@^1.0.2:
   version "1.1.0"
