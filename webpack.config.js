@@ -16,8 +16,10 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const isProd = process.env.NODE_ENV === 'production';
+
 export default {
-	mode: 'development',
+	mode: isProd ? 'production' : 'development',
 	entry: {
 		index: './src/index.js',
 	},
@@ -77,9 +79,11 @@ export default {
 		new CopyPlugin({
 			patterns: [
 				{ from: 'src/assets', to: 'assets' },
+				// Cloudflare Pages routing fallback (safe to include even if unused).
+				{ from: 'src/_redirects', to: '.', noErrorOnMissing: true },
 				{ from: 'node_modules/three/examples/js/libs/basis', to: 'vendor' },
 			],
 		}),
 	],
-	devtool: 'source-map',
+	devtool: isProd ? false : 'source-map',
 };

@@ -17,3 +17,4 @@
 
 # blender backups
 *.blend?
+/node_modules
