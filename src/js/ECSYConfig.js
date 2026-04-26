@@ -111,6 +111,8 @@ import { FaunaMovementBoundSamplerSystem } from './devTools/FaunaMovementBoundSa
 import { GameStateComponent } from './components/GameStateComponent';
 import { GameStateUpdateSystem } from './systems/core/GameStateUpdateSystem';
 import { GardenManagementSystem } from './systems/landing-page/GardenManagementSystem';
+import { GaussianSplatLoaderComponent } from './components/GaussianSplatLoaderComponent';
+import { GaussianSplatLoaderSystem } from './systems/assets/GaussianSplatLoaderSystem';
 import { GazeFollowSystem } from './systems/ui/GazeFollowSystem';
 import { GazeFollowerComponent } from './components/GazeFollowerComponent';
 import { HandAnimationSystem } from './systems/hands/HandAnimationSystem';
@@ -283,6 +285,7 @@ const registerComponents = (world) => {
 	world.registerComponent(SkeletonAnimationComponent);
 	world.registerComponent(MovableFaunaComponent);
 	world.registerComponent(StationaryFaunaComponent);
+	world.registerComponent(GaussianSplatLoaderComponent);
 	world.registerComponent(MeshPreviewObject);
 	world.registerComponent(SceneLightingComponent, false); // disable component pooling so we can setup on construction
 	world.registerComponent(LoadingScreenComponent);
@@ -339,6 +342,7 @@ export const registerSystemsAfterLoad = (world) => {
 	world.registerSystem(UIPanelResourcesSystem);
 	world.registerSystem(UIPanelInteractionSystem);
 	world.registerSystem(UIPanelMediaSystem);
+	world.registerSystem(GaussianSplatLoaderSystem);
 
 	world.registerSystem(HandCreationSystem);
 	world.registerSystem(EnterVRTransitionSystem);

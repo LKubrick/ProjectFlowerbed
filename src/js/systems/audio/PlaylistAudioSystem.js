@@ -23,6 +23,8 @@ const _vector = new THREE.Vector3();
 
 export class PlaylistAudioSystem extends System {
 	init() {
+		this._missingAudioIds = new Set();
+
 		// play sounds from playlists that were created before
 		// audio was initialized
 		this.queries.playlistSounds.results.forEach((entity) => {
@@ -93,6 +95,10 @@ export class PlaylistAudioSystem extends System {
 		const playlistResource = playlistEntity.getMutableComponent(
 			PlaylistAudioResources,
 		);
+		if (!playlistResource) {
+			return;
+		}
+
 		const audioDatabase = getOnlyEntity(
 			this.queries.assetDatabase,
 		).getComponent(AssetDatabaseComponent)?.audio;
@@ -101,11 +107,18 @@ export class PlaylistAudioSystem extends System {
 			trackNumber = 0;
 		}
 
-		const trackId = audioDatabase.play(playlistResource.ids[trackNumber]);
+		const audioId = playlistResource.ids[trackNumber];
+		const audioObject = audioDatabase.get(audioId);
+		if (!audioObject) {
+			this._warnMissingAudio(audioId);
+			playlistResource.currentlyPlaying = undefined;
+			playlistResource.currentlyPlayingId = undefined;
+			return;
+		}
+
+		const trackId = audioDatabase.play(audioId);
 		playlistResource.currentlyPlayingId = trackId;
-		playlistResource.currentlyPlaying = audioDatabase.get(
-			playlistResource.ids[trackNumber],
-		);
+		playlistResource.currentlyPlaying = audioObject;
 
 		playlistResource.currentlyPlaying.once(
 			'play',
@@ -149,6 +162,15 @@ export class PlaylistAudioSystem extends System {
 		}
 		playlistResource.currentlyPlaying.off('end');
 		playlistResource.currentlyPlaying.stop();
+	}
+
+	_warnMissingAudio(id) {
+		if (this._missingAudioIds.has(id)) {
+			return;
+		}
+
+		this._missingAudioIds.add(id);
+		console.warn(`Skipping unavailable playlist audio asset: ${id}`);
 	}
 }
 

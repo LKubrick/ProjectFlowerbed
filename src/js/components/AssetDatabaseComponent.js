@@ -63,7 +63,18 @@ export class AssetDatabaseComponent extends Component {
 			promises.push(this.audio.load(id, audioArray));
 		}
 
-		return Promise.all(promises);
+		return Promise.allSettled(promises).then((results) => {
+			const failedAudioIds = results
+				.map((result, index) => ({ result, id: ids[index] }))
+				.filter(({ result }) => result.status === 'rejected')
+				.map(({ id }) => id);
+
+			if (failedAudioIds.length > 0) {
+				console.warn(
+					`Failed to load ${failedAudioIds.length} audio asset(s); continuing without audio: ${failedAudioIds.join(', ')}`,
+				);
+			}
+		});
 	}
 }
 

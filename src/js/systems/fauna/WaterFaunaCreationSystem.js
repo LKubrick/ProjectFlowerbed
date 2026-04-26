@@ -116,8 +116,18 @@ export class WaterFaunaCreationSystem extends System {
 	execute(_delta, _time) {
 		if (this._gameState.allAssetsLoaded) {
 			if (!this._collidersHidden) {
-				this._scene.getObjectByName('RiverBoundingRegion').visible = false;
-				this._scene.getObjectByName('PondBoundingRegion').visible = false;
+				const riverBoundingRegion = this._scene.getObjectByName(
+					'RiverBoundingRegion',
+				);
+				const pondBoundingRegion = this._scene.getObjectByName(
+					'PondBoundingRegion',
+				);
+				if (riverBoundingRegion) {
+					riverBoundingRegion.visible = false;
+				}
+				if (pondBoundingRegion) {
+					pondBoundingRegion.visible = false;
+				}
 				this._collidersHidden = true;
 			}
 			this.queries.faunaGroups.results.forEach((groupEntity) => {

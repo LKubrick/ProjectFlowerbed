@@ -64,6 +64,14 @@ prepare().then((xrdevice) => {
 	const clock = new THREE.Clock();
 	let global_scene = null;
 	const AUDIT_MATRIX_UPDATES = false;
+	window.__flowerbedDebug = {
+		world,
+		get scene() {
+			return global_scene;
+		},
+		renderer: null,
+		camera: null,
+	};
 
 	// three-mesh-bvh initialization
 	THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -137,6 +145,9 @@ prepare().then((xrdevice) => {
 			800,
 		);
 
+		window.__flowerbedDebug.renderer = renderer;
+		window.__flowerbedDebug.camera = camera;
+
 		camera.position.set(0, 1.6, 0);
 		camera.layers.enable(THREEJS_LAYERS.VIEWER_ONLY);
 		camera.matrixAutoUpdate = true;
@@ -186,7 +197,6 @@ prepare().then((xrdevice) => {
 			),
 		});
 
-		const movieDiv = document.getElementById('splash-trailer');
 		renderer.xr.addEventListener('sessionstart', function () {
 			const xrSession = renderer.xr.getSession();
 
@@ -201,13 +211,10 @@ prepare().then((xrdevice) => {
 
 		window.addEventListener('experienceend', function () {
 			gameManager.removeComponent(LoopingAudioComponent);
-			movieDiv.play();
 			document.body.style.overflow = 'auto';
 		});
 
 		window.addEventListener('experiencestart', function () {
-			movieDiv.pause();
-
 			// hide scrollbars on body
 			document.body.style.overflow = 'hidden';
 		});

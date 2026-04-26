@@ -11,6 +11,7 @@ import * as localForage from 'localforage';
 import { deleteEntity, getOnlyEntity } from '../../utils/entityUtils';
 
 import { AssetDatabaseComponent } from '../../components/AssetDatabaseComponent';
+import { DEBUG_CONSTANTS } from '../../Constants';
 import { GameStateComponent } from '../../components/GameStateComponent';
 import { LOCOMOTION_CONSTANTS } from '../../Constants';
 import { PlantTinyColliderComponent } from '../../components/PlantingComponents';
@@ -101,9 +102,14 @@ export class LocalSaveDataSystem extends System {
 				initialPosition.y,
 				initialPosition.z,
 			);
-			playerState.viewerTransform.rotation.setFromQuaternion(
-				new THREE.Quaternion(0, 0.3826832701261641, 0, 0.9238791864568084),
-			);
+
+			if (DEBUG_CONSTANTS.USE_MINIMAL_PLANT_BED_SCENE) {
+				playerState.viewerTransform.rotation.set(0, 0, 0);
+			} else {
+				playerState.viewerTransform.rotation.setFromQuaternion(
+					new THREE.Quaternion(0, 0.3826832701261641, 0, 0.9238791864568084),
+				);
+			}
 		});
 
 		// reset interaction mode

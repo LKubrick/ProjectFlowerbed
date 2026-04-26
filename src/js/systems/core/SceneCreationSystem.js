@@ -6,35 +6,43 @@
  */
 
 import * as THREE from 'three';
-
 import {
-	EnvironmentProp,
-	MainEnvironment,
-} from '../../components/GameObjectTagComponents';
-import { deleteEntity, getOnlyEntity } from '../../utils/entityUtils';
-
+	COLLISION_LAYERS,
+	DEBUG_CONSTANTS,
+	LOCOMOTION_CONSTANTS,
+} from '../../Constants';
 import { AssetDatabaseComponent } from '../../components/AssetDatabaseComponent';
+import { EnvironmentProp } from '../../components/GameObjectTagComponents';
+import { FaunaClusterComponent } from '../../components/FaunaClusterComponent';
 import { FaunaMaterial } from 'src/js/lib/shaders/WoodlandFaunaShader';
 import { FullRoughMaterial } from '../../lib/shaders/WoodlandFullRoughShader';
 import { GameStateComponent } from '../../components/GameStateComponent';
+import { GaussianSplatLoaderComponent } from '../../components/GaussianSplatLoaderComponent';
 import { GroundMaterial } from '../../lib/shaders/WoodlandGroundShader.js';
 import { InstancedMeshInstanceComponent } from '../../components/InstancedMeshComponent';
-import { LOCOMOTION_CONSTANTS } from '../../Constants';
+import { MainEnvironment } from '../../components/GameObjectTagComponents';
 import { MatteMaterial } from '../../lib/shaders/WoodlandMatteShader';
 import { MeshIdComponent } from '../../components/AssetReplacementComponents';
+import { MorphTargetAnimationComponent } from '../../components/MorphTargetAnimationComponent';
+import { MovableFaunaComponent } from '../../components/MovableFaunaComponent';
 import { Object3DComponent } from '../../components/Object3DComponent';
 import { OptimizedModelComponent } from '../../components/OptimizedModelComponent';
 import { PlantMaterial } from '../../lib/shaders/WoodlandPlantShader.js';
 import { PlayerStateComponent } from '../../components/PlayerStateComponent';
 import { SceneLightingComponent } from '../../components/SceneLightingComponent';
 import { ScreenshotCameraComponent } from '../../components/ScreenshotCameraComponent';
+import { SkeletonAnimationComponent } from '../../components/SkeletonAnimationComponent';
 import { SkyMaterial } from '../../lib/shaders/WoodlandSkyShader.js';
+import { StaticColliderComponent } from '../../components/ColliderComponents';
+import { StationaryFaunaComponent } from '../../components/StationaryFaunaComponent';
 import { System } from 'ecsy';
 import { THREEGlobalComponent } from '../../components/THREEGlobalComponent';
 import { UIPanelMaterial } from '../../lib/shaders/WoodlandUIPanelShader';
 import { UnderwaterDirtMaterial } from '../../lib/shaders/WoodlandUnderwaterDirtShader.js';
 import { WaterMaterial } from '../../lib/shaders/WoodlandWaterShader.js';
 import { copyTransforms } from '../../utils/transformUtils';
+import { deleteEntity } from '../../utils/entityUtils';
+import { getOnlyEntity } from '../../utils/entityUtils';
 import { updateMatrixRecursively } from '../../utils/object3dUtils';
 
 const USE_CHEAP_MATERIAL = false;
@@ -50,6 +58,7 @@ export class SceneCreationSystem extends System {
 		this.renderer = undefined;
 		this.viewerTransform = undefined;
 		this.hasCreatedControllers = false;
+		this.hasCreatedMinimalScene = false;
 		this.clock = new THREE.Clock();
 		this.materialOverrides = {};
 
@@ -348,8 +357,326 @@ export class SceneCreationSystem extends System {
 		assetDatabaseComponent.meshes.setMaterialOverride(simpleMaterialOverride);
 	}
 
+	getSceneNodeLabels(node, includeAncestors = true) {
+		const labels = [];
+
+		if (node.name) {
+			labels.push(node.name);
+		}
+		if (node.userData?.link) {
+			labels.push(node.userData.link);
+		}
+		if (node.material?.name) {
+			labels.push(node.material.name);
+		}
+
+		if (!includeAncestors) {
+			return labels;
+		}
+
+		let currentNode = node.parent;
+
+		while (currentNode) {
+			if (currentNode.name) {
+				labels.push(currentNode.name);
+			}
+			if (currentNode.userData?.link) {
+				labels.push(currentNode.userData.link);
+			}
+			currentNode = currentNode.parent;
+		}
+
+		return labels;
+	}
+
+	matchesSceneNodePatterns(node, patterns, includeAncestors = true) {
+		if (!patterns?.length) {
+			return false;
+		}
+
+		const labels = this.getSceneNodeLabels(node, includeAncestors);
+		return patterns.some((pattern) => {
+			if (pattern instanceof RegExp) {
+				return labels.some((label) => {
+					pattern.lastIndex = 0;
+					return pattern.test(label);
+				});
+			}
+
+			return labels.some((label) => label.includes(pattern));
+		});
+	}
+
+	shouldDisableSceneNode(node) {
+		if (DEBUG_CONSTANTS.USE_MINIMAL_PLANT_BED_SCENE) {
+			return true;
+		}
+
+		if (
+			DEBUG_CONSTANTS.KEEP_ONLY_FLOOR &&
+			!this.matchesSceneNodePatterns(
+				node,
+				DEBUG_CONSTANTS.FLOOR_SCENE_OBJECT_PATTERNS,
+				false,
+			)
+		) {
+			return true;
+		}
+
+		return this.matchesSceneNodePatterns(
+			node,
+			DEBUG_CONSTANTS.DISABLED_SCENE_OBJECT_PATTERNS,
+		);
+	}
+
+	createMinimalSceneAsset(scene, meshId, position, rotationY = 0, scale = 1) {
+		const entity = this.world.createEntity();
+		const placeholder = new THREE.Object3D();
+		placeholder.position.copy(position);
+		placeholder.rotation.y = rotationY;
+		placeholder.scale.setScalar(scale);
+		scene.add(placeholder);
+
+		entity.addComponent(Object3DComponent, {
+			value: placeholder,
+		});
+		entity.addComponent(MeshIdComponent, {
+			id: meshId,
+		});
+
+		return entity;
+	}
+
+	createMinimalStationaryFauna(
+		scene,
+		meshId,
+		position,
+		rotationY,
+		scale,
+		idleAnimations,
+		engagedAnimations = [],
+	) {
+		const entity = this.createMinimalSceneAsset(
+			scene,
+			meshId,
+			position,
+			rotationY,
+			scale,
+		);
+
+		entity.addComponent(StationaryFaunaComponent, {
+			spawnLocations: [position.clone()],
+		});
+		entity.addComponent(SkeletonAnimationComponent, {
+			idleAnimations,
+			engagedAnimations,
+			animationActions: [],
+		});
+
+		return entity;
+	}
+
+	createMinimalFaunaCluster(center, outerDimensions, options = {}) {
+		const innerDimensions = outerDimensions.clone().multiplyScalar(0.8);
+		const halfInner = innerDimensions.clone().multiplyScalar(0.5);
+
+		const cluster = this.world.createEntity();
+		cluster.addComponent(FaunaClusterComponent, {
+			boundingBoxCenter: center.clone(),
+			boundingBoxOuterDimensions: outerDimensions.clone(),
+			boundingBoxInnerDimensions: innerDimensions,
+			boundingBoxInnerMin: center.clone().sub(halfInner),
+			boundingBoxInnerMax: center.clone().add(halfInner),
+			meshObservationPoints: [],
+			minSpeed: options.minSpeed,
+			maxSpeed: options.maxSpeed,
+			minYRadian: options.minYRadian,
+			maxYRadian: options.maxYRadian,
+			avoidanceDistance: options.avoidanceDistance,
+			avoidanceFactor: options.avoidanceFactor,
+			turnDegreesRadian: options.turnDegreesRadian,
+			negateDirection: options.negateDirection,
+			verticalPathVariationFrequency: options.verticalPathVariationFrequency,
+			verticalPathVariationFactor: options.verticalPathVariationFactor,
+			horizontalPathVariationFrequency:
+				options.horizontalPathVariationFrequency,
+			horizontalPathVariationFactor: options.horizontalPathVariationFactor,
+			faunas: [],
+		});
+
+		return cluster;
+	}
+
+	createMinimalMovableFauna(
+		scene,
+		meshId,
+		position,
+		rotationY,
+		scale,
+		clusterComponent,
+		morphTargetSequence,
+	) {
+		const entity = this.createMinimalSceneAsset(
+			scene,
+			meshId,
+			position,
+			rotationY,
+			scale,
+		);
+
+		const direction = new THREE.Vector3(
+			Math.sin(rotationY),
+			0,
+			Math.cos(rotationY),
+		).normalize();
+		const speedRange = clusterComponent.maxSpeed - clusterComponent.minSpeed;
+
+		entity.addComponent(MovableFaunaComponent, {
+			direction,
+			speed: clusterComponent.minSpeed + Math.random() * speedRange,
+			verticalVariationOffset:
+				clusterComponent.verticalPathVariationFactor === 0
+					? 0
+					: Math.random() /
+						clusterComponent.verticalPathVariationFrequency,
+			horizontalVariationOffset:
+				clusterComponent.horizontalPathVariationFactor === 0
+					? 0
+					: Math.random() /
+						clusterComponent.horizontalPathVariationFrequency,
+		});
+		entity.addComponent(MorphTargetAnimationComponent, {
+			morphTargetSequence,
+		});
+
+		clusterComponent.faunas.push(entity);
+		return entity;
+	}
+
+	createMinimalSceneSplat(scene, _floorCenter) {
+		if (!DEBUG_CONSTANTS.MINIMAL_SCENE_SPLAT_URL) {
+			return;
+		}
+
+		const splatAnchor = new THREE.Object3D();
+		splatAnchor.position.set(0, 0.1, 0);
+		splatAnchor.scale.setScalar(DEBUG_CONSTANTS.MINIMAL_SCENE_SPLAT_SCALE);
+		scene.add(splatAnchor);
+
+		const splatEntity = this.world.createEntity();
+		splatEntity.addComponent(Object3DComponent, {
+			value: splatAnchor,
+		});
+		splatEntity.addComponent(GaussianSplatLoaderComponent, {
+			splatUrl: DEBUG_CONSTANTS.MINIMAL_SCENE_SPLAT_URL,
+			autoLoad: true,
+			enableLod: DEBUG_CONSTANTS.MINIMAL_SCENE_SPLAT_ENABLE_LOD,
+			lodSplatScale: DEBUG_CONSTANTS.MINIMAL_SCENE_SPLAT_LOD_SCALE,
+		});
+	}
+
+	createMinimalSceneFloor(scene, floorCenter) {
+		const floorMesh = new THREE.Mesh(
+			new THREE.BoxGeometry(24, 1, 24),
+			new THREE.MeshPhongMaterial({
+				color: 0x8e7556,
+				transparent: true,
+				opacity: 0,
+			}),
+		);
+		floorMesh.name = 'MinimalSceneFloor';
+		floorMesh.position.copy(floorCenter).add(new THREE.Vector3(0, -0.5, 0));
+		floorMesh.receiveShadow = false;
+		floorMesh.castShadow = false;
+		floorMesh.visible = false;
+		scene.add(floorMesh);
+		updateMatrixRecursively(floorMesh);
+
+		const floorCollider = this.world.createEntity();
+		floorCollider.addComponent(StaticColliderComponent, {
+			mesh: floorMesh,
+			layers: [
+				COLLISION_LAYERS.OBSTACLE,
+				COLLISION_LAYERS.PLANTABLE_SURFACE,
+				COLLISION_LAYERS.TELEPORT_SURFACE,
+			],
+		});
+	}
+
+	createMinimalPlantBedScene(scene, playerStart) {
+		const floorCenter = playerStart.clone().add(new THREE.Vector3(0, 0, -3));
+		this.createMinimalSceneFloor(scene, floorCenter);
+		this.createMinimalSceneSplat(scene, floorCenter);
+
+		const rabbitSpot = floorCenter.clone().add(new THREE.Vector3(0, 0, -1.3));
+		const butterflyLeft = floorCenter.clone().add(new THREE.Vector3(-1.65, 1.2, 0.4));
+		const butterflyRight = floorCenter.clone().add(new THREE.Vector3(1.65, 1.2, 0.4));
+		const butterflyCluster = this.createMinimalFaunaCluster(
+			floorCenter.clone().add(new THREE.Vector3(0, 1.2, 0.4)),
+			new THREE.Vector3(5.5, 1.4, 2.4),
+			{
+				minSpeed: 0.005,
+				maxSpeed: 0.01,
+				minYRadian: (-20 * Math.PI) / 180,
+				maxYRadian: (20 * Math.PI) / 180,
+				avoidanceDistance: 0.1,
+				avoidanceFactor: 0.5,
+				turnDegreesRadian: (5 * Math.PI) / 180,
+				negateDirection: true,
+				verticalPathVariationFrequency: 0.5,
+				verticalPathVariationFactor: Math.PI / 180,
+				horizontalPathVariationFrequency: 0.5,
+				horizontalPathVariationFactor: Math.PI / 180,
+			},
+		).getMutableComponent(FaunaClusterComponent);
+		this.createMinimalStationaryFauna(
+			scene,
+			'FAUNA_RABBIT',
+			rabbitSpot,
+			Math.PI,
+			1,
+			[
+				{ name: 'Idle_01', loop: THREE.LoopRepeat },
+				{ name: 'Idle_Var_01', loop: THREE.LoopOnce },
+				{ name: 'Idle_Var_02', loop: THREE.LoopRepeat },
+				{ name: 'Idle_Var_03', loop: THREE.LoopOnce },
+				{ name: 'Idle_Var_04', loop: THREE.LoopOnce },
+			],
+			[{ name: 'Engaged_01', loop: THREE.LoopRepeat }],
+		);
+		this.createMinimalMovableFauna(
+			scene,
+			'FAUNA_BLUE_BUTTERFLY',
+			butterflyLeft,
+			Math.PI / 3,
+			1.1,
+			butterflyCluster,
+			[
+				{ name: 'Flap_Up', duration: 0.1 },
+				{ name: 'Flap_Down', duration: 0.1 },
+			],
+		);
+		this.createMinimalMovableFauna(
+			scene,
+			'FAUNA_ORANGE_BUTTERFLY',
+			butterflyRight,
+			-Math.PI / 4,
+			1.1,
+			butterflyCluster,
+			[
+				{ name: 'Flap_Up', duration: 0.1 },
+				{ name: 'Flap_Down', duration: 0.1 },
+			],
+		);
+	}
+
 	setupMapOverrides(scene, mapObject) {
 		mapObject.traverse((node) => {
+			if (this.shouldDisableSceneNode(node)) {
+				node.visible = false;
+				return;
+			}
+
 			if (node.userData?.link) {
 				node.visible = false;
 				// we hide the existing node, and then create an entity
@@ -433,6 +760,28 @@ export class SceneCreationSystem extends System {
 		}
 
 		let environmentObject = assetDatabaseComponent.meshes.getMesh(mapId);
+
+		if (DEBUG_CONSTANTS.USE_MINIMAL_PLANT_BED_SCENE) {
+			LOCOMOTION_CONSTANTS.INITIAL_POSITION[gameState.currentBaseMapId].set(
+				0,
+				0,
+				1,
+			);
+
+			if (!this.hasCreatedMinimalScene) {
+				this.createMinimalPlantBedScene(
+					scene,
+					LOCOMOTION_CONSTANTS.INITIAL_POSITION[gameState.currentBaseMapId],
+				);
+				this.hasCreatedMinimalScene = true;
+			}
+
+			gameState.allAssetsLoaded = true;
+			updateMatrixRecursively(scene);
+			scene.updateMatrixWorld(true);
+			return;
+		}
+
 		this.setupMapOverrides(scene, environmentObject);
 
 		// set default player start position

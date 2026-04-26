@@ -66,6 +66,7 @@ export default {
 			// change this to change how different backends will use different
 			// code paths
 			'@config': path.resolve(__dirname, './src/js/config/github'),
+			three$: path.resolve(__dirname, './src/js/lib/three-compat.js'),
 			src: path.resolve(__dirname, 'src'),
 		},
 	},
@@ -79,6 +80,7 @@ export default {
 		new CopyPlugin({
 			patterns: [
 				{ from: 'src/assets', to: 'assets' },
+				{ from: 'content/splats', to: 'assets/splats', noErrorOnMissing: true },
 				// Cloudflare Pages routing fallback (safe to include even if unused).
 				{ from: 'src/_redirects', to: '.', noErrorOnMissing: true },
 				{ from: 'node_modules/three/examples/js/libs/basis', to: 'vendor' },

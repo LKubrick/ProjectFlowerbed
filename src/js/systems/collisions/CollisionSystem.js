@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 
+import { COLLISION_LAYERS, DEBUG_CONSTANTS } from '../../Constants';
 import {
 	CollisionWorldComponent,
 	StaticColliderComponent,
@@ -23,7 +24,6 @@ import {
 } from '../../utils/object3dUtils';
 
 import { AssetDatabaseComponent } from '../../components/AssetDatabaseComponent';
-import { COLLISION_LAYERS } from '../../Constants';
 import { CollisionWorld } from '../../lib/collisions/CollisionWorld';
 import { GameStateComponent } from '../../components/GameStateComponent';
 import { MeshIdComponent } from '../../components/AssetReplacementComponents';
@@ -38,6 +38,13 @@ export class CollisionWorldSystem extends System {
 	execute() {
 		let gameManager = getOnlyEntity(this.queries.gameManager);
 		let scene = gameManager.getComponent(THREEGlobalComponent).scene;
+
+		if (
+			DEBUG_CONSTANTS.USE_MINIMAL_PLANT_BED_SCENE &&
+			!getOnlyEntity(this.queries.world, false)
+		) {
+			this.createEmptyCollisionWorld();
+		}
 
 		this.queries.environmentObject.removed.forEach(() => {
 			this.queries.world.results.forEach((collisionWorld) => {
@@ -116,6 +123,18 @@ export class CollisionWorldSystem extends System {
 						staticCollider.mesh;
 				}
 			}
+		});
+	}
+
+	createEmptyCollisionWorld() {
+		const collisionWorldEntity = this.world.createEntity();
+		const worldBounds = new THREE.Box3(
+			new THREE.Vector3(-25, -25, -25),
+			new THREE.Vector3(25, 25, 25),
+		);
+		this.collisionWorld = new CollisionWorld(worldBounds);
+		collisionWorldEntity.addComponent(CollisionWorldComponent, {
+			world: this.collisionWorld,
 		});
 	}
 

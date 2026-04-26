@@ -30,6 +30,8 @@ const _orientation = new THREE.Vector3();
 
 export class AudioSystem extends System {
 	init() {
+		this._missingAudioIds = new Set();
+
 		const compressor = Howler.ctx.createDynamicsCompressor();
 
 		Howler.masterGain.disconnect(Howler.ctx.destination);
@@ -92,6 +94,16 @@ export class AudioSystem extends System {
 		this.queries.oneshotSounds.results.forEach((entity) => {
 			const oneshot = entity.getComponent(OneshotAudioComponent);
 			const audioObject = audioDatabase.get(oneshot.id);
+			if (!audioObject) {
+				this._warnMissingAudio(oneshot.id);
+				if (oneshot.isTempEntity) {
+					entity.remove();
+				} else {
+					entity.removeComponent(OneshotAudioComponent);
+				}
+				return;
+			}
+
 			// play the sound
 			const instanceId = audioDatabase.play(oneshot.id);
 
@@ -121,6 +133,9 @@ export class AudioSystem extends System {
 
 		this.queries.loopingSounds.removed.forEach((entity) => {
 			const loopResource = entity.getComponent(LoopingAudioResources);
+			if (!loopResource) {
+				return;
+			}
 
 			// stop the sound
 			audioDatabase.stop(
@@ -136,6 +151,10 @@ export class AudioSystem extends System {
 		this.queries.loopingSounds.changed.forEach((entity) => {
 			const loop = entity.getComponent(LoopingAudioComponent);
 			const loopResource = entity.getMutableComponent(LoopingAudioResources);
+			if (!loopResource) {
+				this._initializeLoopingSound(entity, audioDatabase);
+				return;
+			}
 
 			// update the loop resource's fadeOutDuration if need be
 			if (loop.fadeOutDuration !== loopResource.fadeOutDuration) {
@@ -152,11 +171,17 @@ export class AudioSystem extends System {
 				);
 				// ...and start the new one right away
 				loopResource.audioId = loop.id;
+				const audioObject = audioDatabase.get(loop.id);
+				if (!audioObject) {
+					this._warnMissingAudio(loop.id);
+					entity.removeComponent(LoopingAudioResources);
+					return;
+				}
 				loopResource.instanceId = audioDatabase.play(
 					loop.id,
 					loop.fadeInDuration,
 				);
-				audioDatabase.get(loop.id).loop(true, loopResource.instanceId);
+				audioObject.loop(true, loopResource.instanceId);
 			}
 		});
 
@@ -177,6 +202,10 @@ export class AudioSystem extends System {
 		const loop = entity.getComponent(LoopingAudioComponent);
 
 		const audioObject = audioDatabase.get(loop.id);
+		if (!audioObject) {
+			this._warnMissingAudio(loop.id);
+			return;
+		}
 
 		audioObject.once('play', () => {
 			if (!audioObject.loop()) {
@@ -206,10 +235,29 @@ export class AudioSystem extends System {
 
 		const loop = entity.getComponent(LoopingAudioComponent);
 		const loopResource = entity.getComponent(LoopingAudioResources);
+		const audioObject = audioDatabase.get(loop.id);
+		if (!loopResource || !audioObject) {
+			if (!audioObject) {
+				this._warnMissingAudio(loop.id);
+			}
+			return;
+		}
 
-		audioDatabase
-			.get(loop.id)
-			.pos(position.x, position.y, position.z, loopResource.instanceId);
+		audioObject.pos(
+			position.x,
+			position.y,
+			position.z,
+			loopResource.instanceId,
+		);
+	}
+
+	_warnMissingAudio(id) {
+		if (this._missingAudioIds.has(id)) {
+			return;
+		}
+
+		this._missingAudioIds.add(id);
+		console.warn(`Skipping unavailable audio asset: ${id}`);
 	}
 
 	_setGlobalAudible(audible, isImmediate) {
