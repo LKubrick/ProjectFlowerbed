@@ -18,6 +18,7 @@ import { getOnlyEntity } from '../../utils/entityUtils';
 const LOAD_TIMEOUT_MS = 30000;
 const SPARK_USAMPLER_PRECISION_LINE = 'precision highp usampler2D;';
 const SPARK_SAMPLER3D_PRECISION_LINE = 'precision highp sampler3D;';
+const SPARK_STEADY_STOCHASTIC_LINE = 'const bool STEADY = true;';
 
 const patchSparkVertexShader = (vertexShader) => {
 	if (
@@ -44,7 +45,7 @@ const patchSparkFragmentShader = (fragmentShader) => {
 	return fragmentShader.replace(
 		'precision highp float;\nprecision highp int;',
 		`precision highp float;\nprecision highp int;\n${SPARK_SAMPLER3D_PRECISION_LINE}`,
-	);
+	).replace('const bool STEADY = false;', SPARK_STEADY_STOCHASTIC_LINE);
 };
 
 const patchSparkIntegerTexture = (texture) => {
@@ -69,6 +70,27 @@ const patchSparkUniformTextures = (sparkRenderer) => {
 	patchSparkIntegerTexture(uniforms.ordering?.value);
 	patchSparkIntegerTexture(uniforms.extSplats?.value);
 	patchSparkIntegerTexture(uniforms.extSplats2?.value);
+};
+
+const enforceSparkDepthState = (sparkRenderer) => {
+	if (!sparkRenderer) {
+		return;
+	}
+
+	if (sparkRenderer.viewpoint) {
+		sparkRenderer.viewpoint.stochastic = true;
+	}
+
+	if (sparkRenderer.uniforms?.stochastic) {
+		sparkRenderer.uniforms.stochastic.value = true;
+	}
+
+	if (sparkRenderer.material) {
+		sparkRenderer.material.transparent = false;
+		sparkRenderer.material.depthTest = true;
+		sparkRenderer.material.depthWrite = true;
+		sparkRenderer.material.needsUpdate = true;
+	}
 };
 
 export class GaussianSplatLoaderSystem extends System {
@@ -132,6 +154,7 @@ export class GaussianSplatLoaderSystem extends System {
 			this.sparkRenderer.frustumCulled = false;
 			this.sparkRenderer.renderOrder = -10;
 			patchSparkUniformTextures(this.sparkRenderer);
+			enforceSparkDepthState(this.sparkRenderer);
 		}
 
 		if (!this.sparkRendererAddedToScene) {
@@ -140,7 +163,9 @@ export class GaussianSplatLoaderSystem extends System {
 		}
 
 		patchSparkUniformTextures(this.sparkRenderer);
+		enforceSparkDepthState(this.sparkRenderer);
 		this.sparkRenderer.update({ scene: threeGlobal.scene });
+		enforceSparkDepthState(this.sparkRenderer);
 
 		const camera = threeGlobal.camera;
 		if (camera instanceof THREE.PerspectiveCamera && !camera.__sparkClonePatched) {

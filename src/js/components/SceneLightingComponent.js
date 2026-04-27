@@ -9,6 +9,7 @@ import * as THREE from 'three';
 
 import { Component, Types } from 'ecsy';
 
+import { DEBUG_CONSTANTS } from '../Constants';
 import { WoodlandCSM } from '../lib/shaders/WoodlandCSM.js';
 
 const ENABLE_CSM = true;
@@ -35,11 +36,13 @@ export class SceneLightingComponent extends Component {
 			return;
 		}
 
-		this.scene.add(
-			new THREE.HemisphereLight(0xffeedd, 0x80c080, AMBIENT_LIGHT_INTENSITY),
-		);
+		if (!DEBUG_CONSTANTS.USE_MINIMAL_PLANT_BED_SCENE) {
+			this.scene.add(
+				new THREE.HemisphereLight(0xffeedd, 0x80c080, AMBIENT_LIGHT_INTENSITY),
+			);
+		}
 
-		if (ENABLE_CSM) {
+		if (ENABLE_CSM && !DEBUG_CONSTANTS.USE_MINIMAL_PLANT_BED_SCENE) {
 			this.renderer.shadowMap.enabled = true;
 			// this.renderer.shadowMap.type = THREE.PCFShadowMap;
 			this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -60,7 +63,7 @@ export class SceneLightingComponent extends Component {
 				globalFinalCascadeBoundsMax: new THREE.Vector3(47, 5, 61), // this value should be determined by content
 				globalFinalCascadeShadowMapSize: 1024,
 			});
-		} else {
+		} else if (!DEBUG_CONSTANTS.USE_MINIMAL_PLANT_BED_SCENE) {
 			let light = new THREE.DirectionalLight(DIRECTIONAL_LIGHT_COLOR);
 			light.position.set(3, 3, 1);
 			light.shadow.camera.top = 50;

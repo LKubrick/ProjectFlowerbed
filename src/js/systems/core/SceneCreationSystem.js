@@ -29,6 +29,7 @@ import { Object3DComponent } from '../../components/Object3DComponent';
 import { OptimizedModelComponent } from '../../components/OptimizedModelComponent';
 import { PlantMaterial } from '../../lib/shaders/WoodlandPlantShader.js';
 import { PlayerStateComponent } from '../../components/PlayerStateComponent';
+import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import { SceneLightingComponent } from '../../components/SceneLightingComponent';
 import { ScreenshotCameraComponent } from '../../components/ScreenshotCameraComponent';
 import { SkeletonAnimationComponent } from '../../components/SkeletonAnimationComponent';
@@ -53,6 +54,35 @@ const IGNORE_ENVMAPS = true;
 const OPTIMIZE_MODEL = true;
 const cubeLoader = new THREE.CubeTextureLoader();
 
+function createSoftFogTexture() {
+	const size = 256;
+	const canvas = document.createElement('canvas');
+	canvas.width = size;
+	canvas.height = size;
+	const context = canvas.getContext('2d');
+	const gradient = context.createRadialGradient(
+		size * 0.5,
+		size * 0.5,
+		size * 0.08,
+		size * 0.5,
+		size * 0.5,
+		size * 0.5,
+	);
+	gradient.addColorStop(0, 'rgba(255,255,255,1)');
+	gradient.addColorStop(0.45, 'rgba(255,255,255,0.72)');
+	gradient.addColorStop(0.8, 'rgba(255,255,255,0.18)');
+	gradient.addColorStop(1, 'rgba(255,255,255,0)');
+	context.fillStyle = gradient;
+	context.fillRect(0, 0, size, size);
+
+	const texture = new THREE.CanvasTexture(canvas);
+	texture.wrapS = THREE.ClampToEdgeWrapping;
+	texture.wrapT = THREE.ClampToEdgeWrapping;
+	texture.minFilter = THREE.LinearFilter;
+	texture.magFilter = THREE.LinearFilter;
+	return texture;
+}
+
 export class SceneCreationSystem extends System {
 	init() {
 		this.renderer = undefined;
@@ -61,6 +91,8 @@ export class SceneCreationSystem extends System {
 		this.hasCreatedMinimalScene = false;
 		this.clock = new THREE.Clock();
 		this.materialOverrides = {};
+		this.tunnelFogTexture = createSoftFogTexture();
+		RectAreaLightUniformsLib.init();
 
 		this.queries.gameManager.results.forEach((entity) => {
 			this.renderer = entity.getComponent(THREEGlobalComponent).renderer;
@@ -553,13 +585,14 @@ export class SceneCreationSystem extends System {
 		return entity;
 	}
 
-	createMinimalSceneSplat(scene, _floorCenter) {
+	createMinimalSceneSplat(scene, splatPosition) {
 		if (!DEBUG_CONSTANTS.MINIMAL_SCENE_SPLAT_URL) {
 			return;
 		}
 
 		const splatAnchor = new THREE.Object3D();
-		splatAnchor.position.set(0, 0.1, 0);
+		splatAnchor.position.copy(splatPosition);
+		splatAnchor.rotation.y = THREE.MathUtils.degToRad(60);
 		splatAnchor.scale.setScalar(DEBUG_CONSTANTS.MINIMAL_SCENE_SPLAT_SCALE);
 		scene.add(splatAnchor);
 
@@ -575,9 +608,391 @@ export class SceneCreationSystem extends System {
 		});
 	}
 
-	createMinimalSceneFloor(scene, floorCenter) {
+	createMinimalSceneBackdrop(scene, playerStart, floorCenter, splatGroundCenter) {
+		scene.background = new THREE.Color(0x000000);
+		scene.fog = null;
+
+		const backdropGround = new THREE.Mesh(
+			new THREE.CircleGeometry(24, 64),
+			new THREE.MeshPhongMaterial({
+				color: 0x171814,
+				emissive: 0x000000,
+				emissiveIntensity: 0,
+				side: THREE.DoubleSide,
+			}),
+		);
+		backdropGround.name = 'MinimalSceneBackdropGround';
+		backdropGround.rotation.x = -Math.PI / 2;
+		backdropGround.position.copy(floorCenter).add(new THREE.Vector3(0, -0.51, 0));
+		backdropGround.receiveShadow = false;
+		backdropGround.castShadow = false;
+		scene.add(backdropGround);
+		updateMatrixRecursively(backdropGround);
+
+		const backdropMulch = new THREE.Mesh(
+			new THREE.CircleGeometry(14.5, 48),
+			new THREE.MeshPhongMaterial({
+				color: 0x11100d,
+				emissive: 0x000000,
+				emissiveIntensity: 0,
+				side: THREE.DoubleSide,
+			}),
+		);
+		backdropMulch.name = 'MinimalSceneBackdropMulch';
+		backdropMulch.rotation.x = -Math.PI / 2;
+		backdropMulch.position.copy(floorCenter).add(new THREE.Vector3(0, -0.505, -0.7));
+		scene.add(backdropMulch);
+		updateMatrixRecursively(backdropMulch);
+
+		const backdropPath = new THREE.Mesh(
+			new THREE.RingGeometry(8.6, 11.8, 64),
+			new THREE.MeshPhongMaterial({
+				color: 0x0f0e0b,
+				emissive: 0x000000,
+				emissiveIntensity: 0,
+				side: THREE.DoubleSide,
+			}),
+		);
+		backdropPath.name = 'MinimalSceneBackdropPath';
+		backdropPath.rotation.x = -Math.PI / 2;
+		backdropPath.position.copy(floorCenter).add(new THREE.Vector3(0, -0.5, -0.4));
+		scene.add(backdropPath);
+		updateMatrixRecursively(backdropPath);
+
+		const backdropCenterLawn = new THREE.Mesh(
+			new THREE.CircleGeometry(8.1, 48),
+			new THREE.MeshPhongMaterial({
+				color: 0x10130e,
+				emissive: 0x000000,
+				emissiveIntensity: 0,
+				side: THREE.DoubleSide,
+			}),
+		);
+		backdropCenterLawn.name = 'MinimalSceneBackdropCenterLawn';
+		backdropCenterLawn.rotation.x = -Math.PI / 2;
+		backdropCenterLawn.position.copy(floorCenter).add(new THREE.Vector3(0, -0.495, -0.2));
+		scene.add(backdropCenterLawn);
+		updateMatrixRecursively(backdropCenterLawn);
+
+		const tunnelStart = playerStart.clone().setY(0);
+		const tunnelDirection = splatGroundCenter
+			.clone()
+			.sub(tunnelStart)
+			.setY(0)
+			.normalize();
+		const tunnelLength = 13.5;
+		const tunnelRearInset = 0.8;
+		const tunnelHalfWidth = 3.15;
+		const tunnelHeight = 5.6;
+		const tunnelShoulderHeight = 1.2;
+		const tunnelShoulderInset = 0.95;
+		const tunnelCenter = tunnelStart
+			.clone()
+			.addScaledVector(tunnelDirection, (tunnelLength * 0.5) - tunnelRearInset)
+			.add(new THREE.Vector3(0, 2.4, 0));
+		const tunnelWallMaterial = new THREE.MeshLambertMaterial({
+			color: 0x141414,
+			fog: false,
+			side: THREE.DoubleSide,
+		});
+		const tunnelShoulderMaterial = new THREE.MeshLambertMaterial({
+			color: 0x1a1a1a,
+			fog: false,
+			side: THREE.DoubleSide,
+		});
+		const tunnelShell = new THREE.Group();
+		tunnelShell.name = 'MinimalSceneTunnelShell';
+		tunnelShell.position.copy(tunnelCenter);
+		tunnelShell.quaternion.setFromUnitVectors(
+			new THREE.Vector3(1, 0, 0),
+			tunnelDirection,
+		);
+		const tunnelLeftWall = new THREE.Mesh(
+			new THREE.BoxGeometry(tunnelLength, tunnelHeight, 0.42),
+			tunnelWallMaterial,
+		);
+		tunnelLeftWall.position.set(0, 0, -tunnelHalfWidth);
+		tunnelShell.add(tunnelLeftWall);
+
+		const tunnelRightWall = new THREE.Mesh(
+			new THREE.BoxGeometry(tunnelLength, tunnelHeight, 0.42),
+			tunnelWallMaterial,
+		);
+		tunnelRightWall.position.set(0, 0, tunnelHalfWidth);
+		tunnelShell.add(tunnelRightWall);
+
+		const tunnelLeftShoulder = new THREE.Mesh(
+			new THREE.BoxGeometry(tunnelLength, 0.34, 2.1),
+			tunnelShoulderMaterial,
+		);
+		tunnelLeftShoulder.position.set(
+			0,
+			(tunnelHeight * 0.5) - tunnelShoulderHeight,
+			-(tunnelHalfWidth - tunnelShoulderInset),
+		);
+		tunnelLeftShoulder.rotation.x = -THREE.MathUtils.degToRad(32);
+		tunnelShell.add(tunnelLeftShoulder);
+
+		const tunnelRightShoulder = new THREE.Mesh(
+			new THREE.BoxGeometry(tunnelLength, 0.34, 2.1),
+			tunnelShoulderMaterial,
+		);
+		tunnelRightShoulder.position.set(
+			0,
+			(tunnelHeight * 0.5) - tunnelShoulderHeight,
+			(tunnelHalfWidth - tunnelShoulderInset),
+		);
+		tunnelRightShoulder.rotation.x = THREE.MathUtils.degToRad(32);
+		tunnelShell.add(tunnelRightShoulder);
+
+		const tunnelCeiling = new THREE.Mesh(
+			new THREE.BoxGeometry(
+				tunnelLength,
+				0.38,
+				((tunnelHalfWidth - tunnelShoulderInset) * 2) + 0.4,
+			),
+			tunnelShoulderMaterial,
+		);
+		tunnelCeiling.position.set(0, (tunnelHeight * 0.5) - 0.19, 0);
+		tunnelShell.add(tunnelCeiling);
+
+		const tunnelBackWall = new THREE.Mesh(
+			new THREE.BoxGeometry(0.42, tunnelHeight, (tunnelHalfWidth * 2) + 0.42),
+			tunnelWallMaterial,
+		);
+		tunnelBackWall.position.set(-(tunnelLength * 0.5) + 0.21, 0, 0);
+		tunnelShell.add(tunnelBackWall);
+		scene.add(tunnelShell);
+		updateMatrixRecursively(tunnelShell);
+
+		const tunnelFloorShade = new THREE.Mesh(
+			new THREE.PlaneGeometry(tunnelLength, (tunnelHalfWidth * 2) - 0.15),
+			new THREE.MeshPhongMaterial({
+				color: 0x0b0b0b,
+				shininess: 12,
+				side: THREE.DoubleSide,
+				fog: false,
+			}),
+		);
+		tunnelFloorShade.name = 'MinimalSceneTunnelFloorShade';
+		tunnelFloorShade.rotation.x = -Math.PI / 2;
+		tunnelFloorShade.position.set(0, -(tunnelHeight * 0.5) + 0.02, 0);
+		tunnelShell.add(tunnelFloorShade);
+		updateMatrixRecursively(tunnelFloorShade);
+
+		const tunnelLeftGuide = new THREE.Mesh(
+			new THREE.BoxGeometry(tunnelLength, 0.12, 0.18),
+			new THREE.MeshBasicMaterial({
+				color: 0x2a2a2a,
+				fog: false,
+			}),
+		);
+		tunnelLeftGuide.position.set(0, -(tunnelHeight * 0.5) + 0.12, -(tunnelHalfWidth - 0.34));
+		tunnelShell.add(tunnelLeftGuide);
+
+		const tunnelRightGuide = new THREE.Mesh(
+			new THREE.BoxGeometry(tunnelLength, 0.12, 0.18),
+			new THREE.MeshBasicMaterial({
+				color: 0x2a2a2a,
+				fog: false,
+			}),
+		);
+		tunnelRightGuide.position.set(0, -(tunnelHeight * 0.5) + 0.12, tunnelHalfWidth - 0.34);
+		tunnelShell.add(tunnelRightGuide);
+
+		const tunnelFogVolume = new THREE.Group();
+		tunnelFogVolume.name = 'MinimalSceneTunnelFogVolume';
+		const fogFloorY = -(tunnelHeight * 0.5) + 0.18;
+		const fogParticleCount = 1800;
+		const fogPositions = new Float32Array(fogParticleCount * 3);
+
+		for (let index = 0; index < fogParticleCount; index += 1) {
+			const baseIndex = index * 3;
+			const lengthT = (Math.random() * 2) - 1;
+			const widthT = (Math.random() * 2) - 1;
+			const heightT = Math.pow(Math.random(), 1.85);
+			fogPositions[baseIndex] = (lengthT * tunnelLength * 0.42) + (tunnelLength * 0.12);
+			fogPositions[baseIndex + 1] = fogFloorY + 0.2 + (heightT * 2.2);
+			fogPositions[baseIndex + 2] = widthT * tunnelHalfWidth * (0.38 + (Math.random() * 0.34));
+		}
+
+		const tunnelFogGeometry = new THREE.BufferGeometry();
+		tunnelFogGeometry.setAttribute(
+			'position',
+			new THREE.BufferAttribute(fogPositions, 3),
+		);
+
+		const tunnelFogBlob = new THREE.Points(
+			tunnelFogGeometry,
+			new THREE.PointsMaterial({
+				color: 0xe8dfcf,
+				map: this.tunnelFogTexture,
+				alphaMap: this.tunnelFogTexture,
+				size: 1.55,
+				sizeAttenuation: true,
+				transparent: true,
+				opacity: 0.16,
+				depthWrite: false,
+				fog: false,
+			}),
+		);
+		tunnelFogBlob.name = 'MinimalSceneTunnelFogBlob';
+		tunnelFogVolume.add(tunnelFogBlob);
+
+		tunnelShell.add(tunnelFogVolume);
+		updateMatrixRecursively(tunnelFogVolume);
+
+		const splatAreaLight = new THREE.RectAreaLight(0xffefc8, 20, 10, 5.8);
+		splatAreaLight.name = 'MinimalSceneSplatAreaLight';
+		splatAreaLight.position.copy(splatGroundCenter).add(new THREE.Vector3(0, 4.2, 1.8));
+		splatAreaLight.lookAt(
+			splatGroundCenter.clone().add(new THREE.Vector3(0, 0.9, 0.2)),
+		);
+		scene.add(splatAreaLight);
+		updateMatrixRecursively(splatAreaLight);
+
+		const splatTunnelSpotLight = new THREE.SpotLight(
+			0xffefcf,
+			4.5,
+			34,
+			THREE.MathUtils.degToRad(26),
+			0.92,
+			1.15,
+		);
+		splatTunnelSpotLight.name = 'MinimalSceneSplatTunnelSpotLight';
+		splatTunnelSpotLight.position.copy(splatGroundCenter).add(new THREE.Vector3(0, 4.8, 2.8));
+		splatTunnelSpotLight.target.position
+			.copy(tunnelStart)
+			.addScaledVector(tunnelDirection, tunnelLength * 0.18)
+			.add(new THREE.Vector3(0, 1.45, 0));
+		scene.add(splatTunnelSpotLight);
+		scene.add(splatTunnelSpotLight.target);
+
+		const domeGeometry = new THREE.SphereGeometry(42, 40, 24);
+		const domeColors = [];
+		const topColor = new THREE.Color(0x000000);
+		const horizonColor = new THREE.Color(0x000000);
+		const bottomColor = new THREE.Color(0x010101);
+		const domeColor = new THREE.Color();
+		const domeRadius = 42;
+		const positionAttribute = domeGeometry.getAttribute('position');
+
+		for (let index = 0; index < positionAttribute.count; index += 1) {
+			const heightT = THREE.MathUtils.clamp(
+				(positionAttribute.getY(index) + domeRadius) / (domeRadius * 2),
+				0,
+				1,
+			);
+
+			if (heightT < 0.45) {
+				domeColor.copy(bottomColor).lerp(horizonColor, heightT / 0.45);
+			} else {
+				domeColor
+					.copy(horizonColor)
+					.lerp(topColor, (heightT - 0.45) / 0.55);
+			}
+
+			domeColors.push(domeColor.r, domeColor.g, domeColor.b);
+		}
+
+		domeGeometry.setAttribute(
+			'color',
+			new THREE.Float32BufferAttribute(domeColors, 3),
+		);
+
+		const backdropDome = new THREE.Mesh(
+			domeGeometry,
+			new THREE.MeshBasicMaterial({
+				vertexColors: true,
+				side: THREE.BackSide,
+				fog: false,
+				depthWrite: false,
+			}),
+		);
+		backdropDome.name = 'MinimalSceneBackdropDome';
+		backdropDome.position.copy(floorCenter).add(new THREE.Vector3(0, 8, 0));
+		backdropDome.renderOrder = -1000;
+		scene.add(backdropDome);
+		updateMatrixRecursively(backdropDome);
+	}
+
+	createMinimalSceneGardenProps(scene, floorCenter, splatGroundCenter) {
+		const enclosureAssets = [
+			{
+				meshId: 'Prop_Fence_01_01',
+				offset: new THREE.Vector3(-6.2, 0, 6.2),
+				rotationY: 0,
+				scale: 1,
+			},
+			{
+				meshId: 'Prop_Fence_01_01',
+				offset: new THREE.Vector3(6.2, 0, 6.2),
+				rotationY: Math.PI,
+				scale: 1,
+			},
+		];
+		const boundaryTrees = [
+			{
+				meshId: 'PLANT_FIR',
+				offset: new THREE.Vector3(-8.2, 0, -2.3),
+				rotationY: THREE.MathUtils.degToRad(34),
+				scale: 1.55,
+			},
+			{
+				meshId: 'PLANT_FIR',
+				offset: new THREE.Vector3(-4.8, 0, -8.2),
+				rotationY: THREE.MathUtils.degToRad(20),
+				scale: 1.7,
+			},
+			{
+				meshId: 'PLANT_FIR',
+				offset: new THREE.Vector3(0.6, 0, -9.1),
+				rotationY: THREE.MathUtils.degToRad(-2),
+				scale: 1.85,
+			},
+			{
+				meshId: 'PLANT_FIR',
+				offset: new THREE.Vector3(5.3, 0, -7.7),
+				rotationY: THREE.MathUtils.degToRad(-24),
+				scale: 1.8,
+			},
+			{
+				meshId: 'PLANT_FIR',
+				offset: new THREE.Vector3(8.1, 0, -2.1),
+				rotationY: THREE.MathUtils.degToRad(-38),
+				scale: 1.58,
+			},
+		];
+
+		enclosureAssets.forEach(({ meshId, offset, rotationY, scale }) => {
+			this.createMinimalSceneAsset(
+				scene,
+				meshId,
+				floorCenter.clone().add(offset),
+				rotationY,
+				scale,
+			);
+		});
+
+		boundaryTrees.forEach(({ meshId, offset, rotationY, scale }) => {
+			this.createMinimalSceneAsset(
+				scene,
+				meshId,
+				splatGroundCenter.clone().add(offset),
+				rotationY,
+				scale,
+			);
+		});
+	}
+
+	createMinimalSceneFloor(scene, playerStart, splatGroundCenter) {
+		const floorDepth = 40;
+		const floorCenter = playerStart
+			.clone()
+			.lerp(splatGroundCenter, 0.5)
+			.add(new THREE.Vector3(0, 0, 1.5));
 		const floorMesh = new THREE.Mesh(
-			new THREE.BoxGeometry(24, 1, 24),
+			new THREE.BoxGeometry(24, 1, floorDepth),
 			new THREE.MeshPhongMaterial({
 				color: 0x8e7556,
 				transparent: true,
@@ -604,16 +1019,23 @@ export class SceneCreationSystem extends System {
 	}
 
 	createMinimalPlantBedScene(scene, playerStart) {
-		const floorCenter = playerStart.clone().add(new THREE.Vector3(0, 0, -3));
-		this.createMinimalSceneFloor(scene, floorCenter);
-		this.createMinimalSceneSplat(scene, floorCenter);
+		const floorCenter = playerStart.clone().add(new THREE.Vector3(0, 0, -13.5));
+		const splatGroundCenter = playerStart.clone().add(new THREE.Vector3(0, 0, -19.5));
+		const splatPosition = splatGroundCenter.clone().add(new THREE.Vector3(0, 0.8, 0));
+		this.createMinimalSceneBackdrop(scene, playerStart, floorCenter, splatGroundCenter);
+		this.createMinimalSceneGardenProps(scene, floorCenter, splatGroundCenter);
+		this.createMinimalSceneFloor(scene, playerStart, splatGroundCenter);
+		this.createMinimalSceneSplat(scene, splatPosition);
 
-		const rabbitSpot = floorCenter.clone().add(new THREE.Vector3(0, 0, -1.3));
-		const butterflyLeft = floorCenter.clone().add(new THREE.Vector3(-1.65, 1.2, 0.4));
-		const butterflyRight = floorCenter.clone().add(new THREE.Vector3(1.65, 1.2, 0.4));
+		const rabbitSpot = splatGroundCenter.clone().add(new THREE.Vector3(-0.9, 0, -0.6));
+		const butterflyLeft = splatGroundCenter.clone().add(new THREE.Vector3(-0.55, 1.15, 0.15));
+		const butterflyRight = splatGroundCenter.clone().add(new THREE.Vector3(0.75, 1.2, -0.1));
+		const butterflyRear = splatGroundCenter.clone().add(new THREE.Vector3(0.2, 1.05, -0.7));
+		const butterflyFrontLeft = splatGroundCenter.clone().add(new THREE.Vector3(-0.95, 1.1, 0.55));
+		const butterflyFrontRight = splatGroundCenter.clone().add(new THREE.Vector3(1.1, 1.25, 0.35));
 		const butterflyCluster = this.createMinimalFaunaCluster(
-			floorCenter.clone().add(new THREE.Vector3(0, 1.2, 0.4)),
-			new THREE.Vector3(5.5, 1.4, 2.4),
+			splatGroundCenter.clone().add(new THREE.Vector3(0.1, 1.15, 0.05)),
+			new THREE.Vector3(3.2, 1.35, 2.4),
 			{
 				minSpeed: 0.005,
 				maxSpeed: 0.01,
@@ -662,6 +1084,42 @@ export class SceneCreationSystem extends System {
 			butterflyRight,
 			-Math.PI / 4,
 			1.1,
+			butterflyCluster,
+			[
+				{ name: 'Flap_Up', duration: 0.1 },
+				{ name: 'Flap_Down', duration: 0.1 },
+			],
+		);
+		this.createMinimalMovableFauna(
+			scene,
+			'FAUNA_BLUE_BUTTERFLY',
+			butterflyRear,
+			Math.PI / 2,
+			1.05,
+			butterflyCluster,
+			[
+				{ name: 'Flap_Up', duration: 0.1 },
+				{ name: 'Flap_Down', duration: 0.1 },
+			],
+		);
+		this.createMinimalMovableFauna(
+			scene,
+			'FAUNA_ORANGE_BUTTERFLY',
+			butterflyFrontLeft,
+			Math.PI / 5,
+			1.08,
+			butterflyCluster,
+			[
+				{ name: 'Flap_Up', duration: 0.1 },
+				{ name: 'Flap_Down', duration: 0.1 },
+			],
+		);
+		this.createMinimalMovableFauna(
+			scene,
+			'FAUNA_BLUE_BUTTERFLY',
+			butterflyFrontRight,
+			-Math.PI / 3,
+			1.12,
 			butterflyCluster,
 			[
 				{ name: 'Flap_Up', duration: 0.1 },
