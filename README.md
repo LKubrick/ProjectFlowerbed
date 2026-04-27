@@ -19,6 +19,16 @@ to set up the local webpack dev server.
 
 You can access the dev server locally by pointing a web browser to `https://127.0.0.1:8081` (on Windows) or `https://0.0.0.0:8081` (on Mac). Note the `https`; WebXR requires a secure connection and doesn't work over `http`.
 
+## Publishing To GitHub Pages
+
+This project can be deployed as a static GitHub Pages site. The experience will still work with local saves in the browser, but the optional REST API code in `server/` is not deployed to GitHub Pages.
+
+1. Push this repository to GitHub.
+2. In the repository settings, open **Pages** and set the source to **GitHub Actions**.
+3. Push to `main` or `master`.
+
+The workflow in `.github/workflows/deploy-pages.yml` will build the site in production mode and publish the `dist/` folder.
+
 ### Viewing the Project on Headset
 
 If your Meta Quest headset is connected to the same wifi network as your computer, you can visit `https://<computer ip address>:8081/` directly on your headset to see Project Flowerbed running on it.

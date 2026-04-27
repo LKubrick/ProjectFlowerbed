@@ -31,4 +31,14 @@ THREEGlobalComponent.schema = {
 	 * @type {THREE.PerspectiveCamera}
 	 */
 	camera: { type: Types.Ref, default: undefined },
+
+	/**
+	 * @type {{ composer: import('three/examples/jsm/postprocessing/EffectComposer.js').EffectComposer }}
+	 */
+	postProcessing: { type: Types.Ref, default: undefined },
+
+	/**
+	 * @type {{ render: (scene: THREE.Scene, camera: THREE.Camera) => void }}
+	 */
+	sparkRenderer: { type: Types.Ref, default: undefined },
 };

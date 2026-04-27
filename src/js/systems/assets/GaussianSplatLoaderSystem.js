@@ -18,7 +18,6 @@ import { getOnlyEntity } from '../../utils/entityUtils';
 const LOAD_TIMEOUT_MS = 30000;
 const SPARK_USAMPLER_PRECISION_LINE = 'precision highp usampler2D;';
 const SPARK_SAMPLER3D_PRECISION_LINE = 'precision highp sampler3D;';
-const SPARK_STEADY_STOCHASTIC_LINE = 'const bool STEADY = true;';
 
 const patchSparkVertexShader = (vertexShader) => {
 	if (
@@ -45,7 +44,7 @@ const patchSparkFragmentShader = (fragmentShader) => {
 	return fragmentShader.replace(
 		'precision highp float;\nprecision highp int;',
 		`precision highp float;\nprecision highp int;\n${SPARK_SAMPLER3D_PRECISION_LINE}`,
-	).replace('const bool STEADY = false;', SPARK_STEADY_STOCHASTIC_LINE);
+	);
 };
 
 const patchSparkIntegerTexture = (texture) => {
@@ -72,27 +71,6 @@ const patchSparkUniformTextures = (sparkRenderer) => {
 	patchSparkIntegerTexture(uniforms.extSplats2?.value);
 };
 
-const enforceSparkDepthState = (sparkRenderer) => {
-	if (!sparkRenderer) {
-		return;
-	}
-
-	if (sparkRenderer.viewpoint) {
-		sparkRenderer.viewpoint.stochastic = true;
-	}
-
-	if (sparkRenderer.uniforms?.stochastic) {
-		sparkRenderer.uniforms.stochastic.value = true;
-	}
-
-	if (sparkRenderer.material) {
-		sparkRenderer.material.transparent = false;
-		sparkRenderer.material.depthTest = true;
-		sparkRenderer.material.depthWrite = true;
-		sparkRenderer.material.needsUpdate = true;
-	}
-};
-
 export class GaussianSplatLoaderSystem extends System {
 	init() {
 		this.instances = new Map();
@@ -112,7 +90,7 @@ export class GaussianSplatLoaderSystem extends System {
 			return;
 		}
 
-		this.ensureSparkRenderer(threeGlobal);
+		this.ensureSparkRenderer(gameManagerEntity, threeGlobal);
 
 		this.queries.splats.results.forEach((entity) => {
 			const splatConfig = entity.getComponent(GaussianSplatLoaderComponent);
@@ -137,7 +115,7 @@ export class GaussianSplatLoaderSystem extends System {
 		});
 	}
 
-	ensureSparkRenderer(threeGlobal) {
+	ensureSparkRenderer(gameManagerEntity, threeGlobal) {
 		this.patchLegacyRendererCompatibility(threeGlobal.renderer);
 
 		if (!this.sparkRenderer) {
@@ -150,11 +128,9 @@ export class GaussianSplatLoaderSystem extends System {
 			this.sparkRenderer.material.fragmentShader = patchSparkFragmentShader(
 				this.sparkRenderer.material.fragmentShader,
 			);
-			this.sparkRenderer.material.needsUpdate = true;
 			this.sparkRenderer.frustumCulled = false;
 			this.sparkRenderer.renderOrder = -10;
 			patchSparkUniformTextures(this.sparkRenderer);
-			enforceSparkDepthState(this.sparkRenderer);
 		}
 
 		if (!this.sparkRendererAddedToScene) {
@@ -162,23 +138,15 @@ export class GaussianSplatLoaderSystem extends System {
 			this.sparkRendererAddedToScene = true;
 		}
 
-		patchSparkUniformTextures(this.sparkRenderer);
-		enforceSparkDepthState(this.sparkRenderer);
-		this.sparkRenderer.update({ scene: threeGlobal.scene });
-		enforceSparkDepthState(this.sparkRenderer);
-
-		const camera = threeGlobal.camera;
-		if (camera instanceof THREE.PerspectiveCamera && !camera.__sparkClonePatched) {
-			camera.clone = function cloneSparkCamera() {
-				const clone = new THREE.PerspectiveCamera();
-				clone.projectionMatrix.copy(this.projectionMatrix);
-				clone.projectionMatrixInverse.copy(this.projectionMatrixInverse);
-				clone.matrixWorld.copy(this.matrixWorld);
-				clone.matrixWorldInverse.copy(this.matrixWorldInverse);
-				return clone;
-			};
-			camera.__sparkClonePatched = true;
+		const mutableThreeGlobal = gameManagerEntity.getMutableComponent(
+			THREEGlobalComponent,
+		);
+		if (mutableThreeGlobal) {
+			mutableThreeGlobal.sparkRenderer = this.sparkRenderer;
 		}
+
+		patchSparkUniformTextures(this.sparkRenderer);
+		this.sparkRenderer.update({ scene: threeGlobal.scene });
 	}
 
 	patchLegacyRendererCompatibility(renderer) {
@@ -239,6 +207,13 @@ export class GaussianSplatLoaderSystem extends System {
 		splat.renderOrder = -10;
 		parent.add(splat);
 		patchSparkUniformTextures(this.sparkRenderer);
+
+		const gameManagerEntity = getOnlyEntity(this.queries.gameManager, false);
+		const threeGlobal = gameManagerEntity?.getComponent(THREEGlobalComponent);
+		if (this.sparkRenderer && threeGlobal?.scene) {
+			this.sparkRenderer.update({ scene: threeGlobal.scene });
+		}
+
 		this.pendingLoads.delete(entity);
 		this.instances.set(entity, { splat });
 	}

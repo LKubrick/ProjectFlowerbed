@@ -10,6 +10,17 @@ import LegalPage from '../subpages/legal.html';
 import MainPage from '../subpages/main.html';
 import PrivacyPage from '../subpages/privacy.html';
 
+const getRepositoryUrl = () => {
+	const { host, pathname } = window.location;
+	if (!host.endsWith('.github.io')) {
+		return 'https://github.com/meta-quest/ProjectFlowerbed';
+	}
+
+	const username = host.replace(/\.github\.io$/u, '');
+	const repo = pathname.split('/').filter(Boolean)[0] || `${username}.github.io`;
+	return `https://github.com/${username}/${repo}`;
+};
+
 export const setupRouter = () => {
 	const loadPage = () => {
 		const pages = document.querySelectorAll('.page');
@@ -64,6 +75,14 @@ export const setupRouter = () => {
 		createPage('about', AboutPage);
 		createPage('legal', LegalPage);
 		createPage('privacy', PrivacyPage);
+
+		const repositoryUrl = getRepositoryUrl();
+		document
+			.querySelectorAll('a[href="https://github.com/meta-quest/ProjectFlowerbed"]')
+			.forEach((link) => {
+				link.href = repositoryUrl;
+			});
+
 		loadPage();
 	};
 

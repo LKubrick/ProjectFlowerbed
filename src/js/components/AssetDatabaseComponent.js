@@ -58,7 +58,12 @@ export class AssetDatabaseComponent extends Component {
 
 		let promises = [];
 		for (let id of ids) {
-			let audioArray = [audio[id] + '.webm', audio[id] + '.mp3'];
+			let audioArray;
+			if (/\.(webm|mp3|wav)$/i.test(audio[id])) {
+				audioArray = [audio[id]];
+			} else {
+				audioArray = [audio[id] + '.webm', audio[id] + '.mp3', audio[id] + '.wav'];
+			}
 			// we have to wrap the audio in an array if it isn't already an array
 			promises.push(this.audio.load(id, audioArray));
 		}

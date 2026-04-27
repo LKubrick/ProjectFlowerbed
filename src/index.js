@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+/* eslint-disable sort-imports */
+
 import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap';
 import './styles/index.css';
@@ -13,33 +15,41 @@ import './styles/overlay.css';
 
 import * as THREE from 'three';
 import * as TWEEN from '@tweenjs/tween.js';
-
-import {
-	PlayerColliderComponent,
-	PlayerStateComponent,
-	createPlayerTransform,
-} from './js/components/PlayerStateComponent';
-import { XRDevice, metaQuest3 } from 'iwer';
 import {
 	acceleratedRaycast,
 	computeBoundsTree,
 	disposeBoundsTree,
 } from 'three-mesh-bvh';
+import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
+import { CapsuleColliderComponent } from './js/components/ColliderComponents';
+import {
+	createPlayerTransform,
+	PlayerColliderComponent,
+	PlayerStateComponent,
+} from './js/components/PlayerStateComponent';
+import { DEBUG_CONSTANTS, THREEJS_LAYERS } from './js/Constants';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js';
+import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
+import { GameStateComponent } from './js/components/GameStateComponent';
 import {
 	initializeCache,
 	setupFetchWithCache,
 } from './js/lib/caching/fetchWithCache';
-
-import { CapsuleColliderComponent } from './js/components/ColliderComponents';
-import { GameStateComponent } from './js/components/GameStateComponent';
 import { LoopingAudioComponent } from './js/components/AudioComponents';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { SessionComponent } from './js/components/SessionComponent';
-import { THREEGlobalComponent } from './js/components/THREEGlobalComponent';
-import { THREEJS_LAYERS } from './js/Constants';
-import ThreeMeshUI from 'three-mesh-ui';
-import { XPlatControlSystem } from './js/systems/xplat/xplat';
 import { setupECSY } from './js/ECSYConfig';
 import { setupRouter } from './js/LandingPage';
+import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { THREEGlobalComponent } from './js/components/THREEGlobalComponent';
+import { XPlatControlSystem } from './js/systems/xplat/xplat';
+import { XRDevice, metaQuest3 } from 'iwer';
+import ThreeMeshUI from 'three-mesh-ui';
+
+/* eslint-enable sort-imports */
 
 const prepare = async () => {
 	let xrdevice;
@@ -55,6 +65,100 @@ const prepare = async () => {
 	window.xrdevice = xrdevice;
 	return xrdevice;
 };
+
+const MAX_RENDER_PIXEL_RATIO = 2;
+
+function getClampedPixelRatio() {
+	return Math.min(window.devicePixelRatio || 1, MAX_RENDER_PIXEL_RATIO);
+}
+
+function updatePostProcessingSize(postProcessing, width, height, pixelRatio) {
+	if (!postProcessing) {
+		return;
+	}
+
+	if (postProcessing.composer.setPixelRatio) {
+		postProcessing.composer.setPixelRatio(pixelRatio);
+	}
+	postProcessing.composer.setSize(width, height);
+
+	postProcessing.fxaaPass.material.uniforms.resolution.value.set(
+		1 / (width * pixelRatio),
+		1 / (height * pixelRatio),
+	);
+
+	if (postProcessing.bokehPass?.setSize) {
+		postProcessing.bokehPass.setSize(width, height);
+	} else if (postProcessing.bokehPass) {
+		postProcessing.bokehPass.renderTargetDepth.setSize(
+			width * pixelRatio,
+			height * pixelRatio,
+		);
+		postProcessing.bokehPass.uniforms.aspect.value = width / height;
+	}
+}
+
+function createPostProcessing(renderer, scene, camera, width, height) {
+	const composer = new EffectComposer(renderer);
+	const renderPass = new RenderPass(scene, camera);
+	composer.addPass(renderPass);
+
+	const ssaoPass = new SSAOPass(scene, camera, width, height);
+	ssaoPass.kernelRadius = 0.1;
+	ssaoPass.minDistance = 0.001;
+	ssaoPass.maxDistance = 0.02;
+	composer.addPass(ssaoPass);
+
+	const bloomPass = new UnrealBloomPass(
+		new THREE.Vector2(width, height),
+		0.4,
+		0.6,
+		0.85,
+	);
+	bloomPass.threshold = 0.85;
+	bloomPass.strength = 0.4;
+	bloomPass.radius = 0.6;
+	composer.addPass(bloomPass);
+
+	let bokehPass = null;
+	let focusTarget = null;
+	if (DEBUG_CONSTANTS.USE_MINIMAL_PLANT_BED_SCENE) {
+		focusTarget = new THREE.Vector3(0, 0.8, -19.5);
+		bokehPass = new BokehPass(scene, camera, {
+			focus: focusTarget.distanceTo(camera.position),
+			aperture: 0.00002,
+			maxblur: 0.01,
+			width,
+			height,
+		});
+		composer.addPass(bokehPass);
+	}
+
+	const filmPass = new FilmPass(0.15, 0, 0, false);
+	composer.addPass(filmPass);
+
+	const fxaaPass = new ShaderPass(FXAAShader);
+	composer.addPass(fxaaPass);
+
+	const postProcessing = {
+		composer,
+		ssaoPass,
+		bloomPass,
+		filmPass,
+		fxaaPass,
+		bokehPass,
+		focusTarget,
+	};
+
+	updatePostProcessingSize(
+		postProcessing,
+		width,
+		height,
+		getClampedPixelRatio(),
+	);
+
+	return postProcessing;
+}
 
 prepare().then((xrdevice) => {
 	// need to load the pages before we load any 3D stuff
@@ -101,11 +205,11 @@ prepare().then((xrdevice) => {
 		global_scene = scene;
 
 		let renderer = new THREE.WebGLRenderer({
-			antialias: true,
+			antialias: false,
 			multiviewStereo: true,
 			// precision: "mediump",
 		});
-		renderer.setPixelRatio(window.devicePixelRatio);
+		renderer.setPixelRatio(getClampedPixelRatio());
 		renderer.setSize(container.offsetWidth, container.offsetHeight);
 		renderer.outputEncoding = THREE.sRGBEncoding;
 		renderer.xr.enabled = true;
@@ -116,7 +220,7 @@ prepare().then((xrdevice) => {
 		renderer.domElement.style.width = '100%';
 		renderer.domElement.style.height = '100%';
 
-		renderer.setOpaqueSort((a, b) => {
+		const opaqueSort = (a, b) => {
 			if (a.groupOrder !== b.groupOrder) {
 				return a.groupOrder - b.groupOrder;
 			} else if (a.renderOrder !== b.renderOrder) {
@@ -131,7 +235,22 @@ prepare().then((xrdevice) => {
 			} else {
 				return a.id - b.id;
 			}
-		});
+		};
+
+		const transparentSort = (a, b) => {
+			if (a.groupOrder !== b.groupOrder) {
+				return a.groupOrder - b.groupOrder;
+			} else if (a.renderOrder !== b.renderOrder) {
+				return a.renderOrder - b.renderOrder;
+			} else if (a.z !== b.z) {
+				return b.z - a.z;
+			} else {
+				return a.id - b.id;
+			}
+		};
+
+		renderer.setOpaqueSort(opaqueSort);
+		renderer.setTransparentSort(transparentSort);
 
 		// turn autoClear back on temporarily - requires a browser that has D38378146
 		// or else this line causes a black screen
@@ -144,9 +263,17 @@ prepare().then((xrdevice) => {
 			0.1,
 			800,
 		);
+		const postProcessing = createPostProcessing(
+			renderer,
+			scene,
+			camera,
+			container.offsetWidth,
+			container.offsetHeight,
+		);
 
 		window.__flowerbedDebug.renderer = renderer;
 		window.__flowerbedDebug.camera = camera;
+		window.__flowerbedDebug.postProcessing = postProcessing;
 
 		camera.position.set(0, 1.6, 0);
 		camera.layers.enable(THREEJS_LAYERS.VIEWER_ONLY);
@@ -164,6 +291,7 @@ prepare().then((xrdevice) => {
 			renderer: renderer,
 			scene: scene,
 			camera: camera,
+			postProcessing,
 		});
 
 		if (xrdevice) {
@@ -223,7 +351,14 @@ prepare().then((xrdevice) => {
 			camera.aspect = container.offsetWidth / container.offsetHeight;
 			camera.updateProjectionMatrix();
 
+			renderer.setPixelRatio(getClampedPixelRatio());
 			renderer.setSize(container.offsetWidth, container.offsetHeight);
+			updatePostProcessingSize(
+				postProcessing,
+				container.offsetWidth,
+				container.offsetHeight,
+				getClampedPixelRatio(),
+			);
 		}
 
 		window.addEventListener('resize', onWindowResize, false);
@@ -240,7 +375,14 @@ prepare().then((xrdevice) => {
 			camera.aspect = vw / vh;
 			camera.updateProjectionMatrix();
 
+			renderer.setPixelRatio(getClampedPixelRatio());
 			renderer.setSize(vw, vh);
+			updatePostProcessingSize(
+				postProcessing,
+				vw,
+				vh,
+				getClampedPixelRatio(),
+			);
 		};
 
 		renderer.setAnimationLoop(render);

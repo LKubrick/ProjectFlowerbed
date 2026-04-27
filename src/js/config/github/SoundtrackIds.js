@@ -5,4 +5,4 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-export const SOUNDTRACK = ['MUSIC_ARABESQUE', 'MUSIC_SPINDLE'];
+export const SOUNDTRACK = ['MUSIC_SPLAT_V2_A_KEYS_LEVEL2_M260312'];

@@ -29,6 +29,7 @@ import { Object3DComponent } from '../../components/Object3DComponent';
 import { OptimizedModelComponent } from '../../components/OptimizedModelComponent';
 import { PlantMaterial } from '../../lib/shaders/WoodlandPlantShader.js';
 import { PlayerStateComponent } from '../../components/PlayerStateComponent';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import { SceneLightingComponent } from '../../components/SceneLightingComponent';
 import { ScreenshotCameraComponent } from '../../components/ScreenshotCameraComponent';
@@ -53,6 +54,24 @@ const IGNORE_NORMALS = false;
 const IGNORE_ENVMAPS = true;
 const OPTIMIZE_MODEL = true;
 const cubeLoader = new THREE.CubeTextureLoader();
+const hdriLoader = new RGBELoader();
+const textureLoader = new THREE.TextureLoader();
+const MINIMAL_SCENE_HDRI_URL = 'assets/HDRI/satara_night_no_lamps_4k.hdr';
+const MINIMAL_SCENE_GROUND_TEXTURE_ROOT =
+	'assets/images/ground_textures/forest_leaves_03_2k/textures';
+
+function setupRepeatedTexture(texture, renderer, isColorTexture = false) {
+	texture.wrapS = THREE.RepeatWrapping;
+	texture.wrapT = THREE.RepeatWrapping;
+	texture.repeat.set(6, 10);
+	if (isColorTexture) {
+		texture.encoding = THREE.sRGBEncoding;
+	}
+	if (renderer?.capabilities?.getMaxAnisotropy) {
+		texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+	}
+	return texture;
+}
 
 function createSoftFogTexture() {
 	const size = 256;
@@ -89,6 +108,9 @@ export class SceneCreationSystem extends System {
 		this.viewerTransform = undefined;
 		this.hasCreatedControllers = false;
 		this.hasCreatedMinimalScene = false;
+		this.hdriTexture = null;
+		this.hdriEnvironment = null;
+		this.minimalSceneHdriSphere = null;
 		this.clock = new THREE.Clock();
 		this.materialOverrides = {};
 		this.tunnelFogTexture = createSoftFogTexture();
@@ -104,6 +126,7 @@ export class SceneCreationSystem extends System {
 			.load(
 				['px.png', 'nx.png', 'py.png', 'ny.png', 'pz.png', 'nz.png'],
 				function (texture) {
+					texture.encoding = THREE.sRGBEncoding;
 					// force generate the PMREM envmap texture!
 					_this.renderer.cubeuvmaps.get(texture);
 					_this.queries.screenShotCameras.results.forEach((ent) => {
@@ -113,6 +136,26 @@ export class SceneCreationSystem extends System {
 					});
 				},
 			);
+
+		hdriLoader.load(
+			MINIMAL_SCENE_HDRI_URL,
+			(texture) => {
+				const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+				if (pmremGenerator.compileEquirectangularShader) {
+					pmremGenerator.compileEquirectangularShader();
+				}
+
+				this.hdriTexture = texture;
+				this.hdriEnvironment = pmremGenerator.fromEquirectangular(texture).texture;
+				pmremGenerator.dispose();
+
+				this.applyMinimalSceneBackground();
+			},
+			undefined,
+			() => {
+				// Keep the cube texture fallback if the HDRI fails to load.
+			},
+		);
 
 		this.queries.gameManager.results.forEach((entity) => {
 			this.renderer = entity.getComponent(THREEGlobalComponent).renderer;
@@ -130,6 +173,49 @@ export class SceneCreationSystem extends System {
 
 			this.setupMaterialOverrides(lightingComponent);
 		});
+	}
+
+	applyMinimalSceneBackground() {
+		if (!DEBUG_CONSTANTS.USE_MINIMAL_PLANT_BED_SCENE) {
+			return;
+		}
+
+		this.queries.gameManager.results.forEach((entity) => {
+			const scene = entity.getComponent(THREEGlobalComponent)?.scene;
+			if (!scene) {
+				return;
+			}
+
+			this.ensureMinimalSceneHdriSphere(scene);
+
+			scene.background =
+				this.minimalSceneHdriSphere
+					? null
+					: this.envMap || new THREE.Color(0x000000);
+			scene.environment = this.hdriEnvironment || this.envMap || null;
+		});
+	}
+
+	ensureMinimalSceneHdriSphere(scene) {
+		if (!this.hdriTexture || this.minimalSceneHdriSphere) {
+			return;
+		}
+
+		const hdriSphereGeometry = new THREE.SphereGeometry(120, 64, 40);
+		hdriSphereGeometry.scale(-1, 1, 1);
+
+		const hdriSphereMaterial = new THREE.MeshBasicMaterial({
+			map: this.hdriTexture,
+			fog: false,
+			depthWrite: false,
+		});
+
+		const hdriSphere = new THREE.Mesh(hdriSphereGeometry, hdriSphereMaterial);
+		hdriSphere.name = 'MinimalSceneHDRISphere';
+		hdriSphere.matrixAutoUpdate = true;
+		hdriSphere.renderOrder = -1000;
+		scene.add(hdriSphere);
+		this.minimalSceneHdriSphere = hdriSphere;
 	}
 
 	execute(_delta, time) {
@@ -151,6 +237,11 @@ export class SceneCreationSystem extends System {
 				entity.getMutableComponent(SceneLightingComponent).update(time);
 			}
 		});
+
+		if (this.minimalSceneHdriSphere && this.viewerTransform) {
+			this.minimalSceneHdriSphere.position.copy(this.viewerTransform.position);
+			this.minimalSceneHdriSphere.updateMatrix();
+		}
 
 		if (this.waterMaterial) {
 			const config = this.waterMaterial.wave_config;
@@ -609,70 +700,8 @@ export class SceneCreationSystem extends System {
 	}
 
 	createMinimalSceneBackdrop(scene, playerStart, floorCenter, splatGroundCenter) {
-		scene.background = new THREE.Color(0x000000);
+		this.applyMinimalSceneBackground();
 		scene.fog = null;
-
-		const backdropGround = new THREE.Mesh(
-			new THREE.CircleGeometry(24, 64),
-			new THREE.MeshPhongMaterial({
-				color: 0x171814,
-				emissive: 0x000000,
-				emissiveIntensity: 0,
-				side: THREE.DoubleSide,
-			}),
-		);
-		backdropGround.name = 'MinimalSceneBackdropGround';
-		backdropGround.rotation.x = -Math.PI / 2;
-		backdropGround.position.copy(floorCenter).add(new THREE.Vector3(0, -0.51, 0));
-		backdropGround.receiveShadow = false;
-		backdropGround.castShadow = false;
-		scene.add(backdropGround);
-		updateMatrixRecursively(backdropGround);
-
-		const backdropMulch = new THREE.Mesh(
-			new THREE.CircleGeometry(14.5, 48),
-			new THREE.MeshPhongMaterial({
-				color: 0x11100d,
-				emissive: 0x000000,
-				emissiveIntensity: 0,
-				side: THREE.DoubleSide,
-			}),
-		);
-		backdropMulch.name = 'MinimalSceneBackdropMulch';
-		backdropMulch.rotation.x = -Math.PI / 2;
-		backdropMulch.position.copy(floorCenter).add(new THREE.Vector3(0, -0.505, -0.7));
-		scene.add(backdropMulch);
-		updateMatrixRecursively(backdropMulch);
-
-		const backdropPath = new THREE.Mesh(
-			new THREE.RingGeometry(8.6, 11.8, 64),
-			new THREE.MeshPhongMaterial({
-				color: 0x0f0e0b,
-				emissive: 0x000000,
-				emissiveIntensity: 0,
-				side: THREE.DoubleSide,
-			}),
-		);
-		backdropPath.name = 'MinimalSceneBackdropPath';
-		backdropPath.rotation.x = -Math.PI / 2;
-		backdropPath.position.copy(floorCenter).add(new THREE.Vector3(0, -0.5, -0.4));
-		scene.add(backdropPath);
-		updateMatrixRecursively(backdropPath);
-
-		const backdropCenterLawn = new THREE.Mesh(
-			new THREE.CircleGeometry(8.1, 48),
-			new THREE.MeshPhongMaterial({
-				color: 0x10130e,
-				emissive: 0x000000,
-				emissiveIntensity: 0,
-				side: THREE.DoubleSide,
-			}),
-		);
-		backdropCenterLawn.name = 'MinimalSceneBackdropCenterLawn';
-		backdropCenterLawn.rotation.x = -Math.PI / 2;
-		backdropCenterLawn.position.copy(floorCenter).add(new THREE.Vector3(0, -0.495, -0.2));
-		scene.add(backdropCenterLawn);
-		updateMatrixRecursively(backdropCenterLawn);
 
 		const tunnelStart = playerStart.clone().setY(0);
 		const tunnelDirection = splatGroundCenter
@@ -689,7 +718,7 @@ export class SceneCreationSystem extends System {
 		const tunnelCenter = tunnelStart
 			.clone()
 			.addScaledVector(tunnelDirection, (tunnelLength * 0.5) - tunnelRearInset)
-			.add(new THREE.Vector3(0, 2.4, 0));
+			.add(new THREE.Vector3(0, tunnelHeight * 0.5, 0));
 		const tunnelWallMaterial = new THREE.MeshLambertMaterial({
 			color: 0x141414,
 			fog: false,
@@ -842,14 +871,23 @@ export class SceneCreationSystem extends System {
 		tunnelShell.add(tunnelFogVolume);
 		updateMatrixRecursively(tunnelFogVolume);
 
-		const splatAreaLight = new THREE.RectAreaLight(0xffefc8, 20, 10, 5.8);
-		splatAreaLight.name = 'MinimalSceneSplatAreaLight';
-		splatAreaLight.position.copy(splatGroundCenter).add(new THREE.Vector3(0, 4.2, 1.8));
-		splatAreaLight.lookAt(
-			splatGroundCenter.clone().add(new THREE.Vector3(0, 0.9, 0.2)),
+		const splatSpotLight = new THREE.SpotLight(
+			0xffefc8,
+			8,
+			24,
+			THREE.MathUtils.degToRad(30),
+			0.45,
+			1,
 		);
-		scene.add(splatAreaLight);
-		updateMatrixRecursively(splatAreaLight);
+		splatSpotLight.name = 'MinimalSceneSplatSpotLight';
+		splatSpotLight.position.copy(splatGroundCenter).add(new THREE.Vector3(0, 4.2, 1.3));
+		splatSpotLight.target.position.copy(
+			splatGroundCenter.clone().add(new THREE.Vector3(0, 0.8, 0)),
+		);
+		scene.add(splatSpotLight);
+		scene.add(splatSpotLight.target);
+		updateMatrixRecursively(splatSpotLight);
+		updateMatrixRecursively(splatSpotLight.target);
 
 		const splatTunnelSpotLight = new THREE.SpotLight(
 			0xffefcf,
@@ -868,129 +906,113 @@ export class SceneCreationSystem extends System {
 		scene.add(splatTunnelSpotLight);
 		scene.add(splatTunnelSpotLight.target);
 
-		const domeGeometry = new THREE.SphereGeometry(42, 40, 24);
-		const domeColors = [];
-		const topColor = new THREE.Color(0x000000);
-		const horizonColor = new THREE.Color(0x000000);
-		const bottomColor = new THREE.Color(0x010101);
-		const domeColor = new THREE.Color();
-		const domeRadius = 42;
-		const positionAttribute = domeGeometry.getAttribute('position');
+		if (!this.hdriTexture && !this.envMap) {
+			const domeGeometry = new THREE.SphereGeometry(42, 40, 24);
+			const domeColors = [];
+			const topColor = new THREE.Color(0x000000);
+			const horizonColor = new THREE.Color(0x000000);
+			const bottomColor = new THREE.Color(0x010101);
+			const domeColor = new THREE.Color();
+			const domeRadius = 42;
+			const positionAttribute = domeGeometry.getAttribute('position');
 
-		for (let index = 0; index < positionAttribute.count; index += 1) {
-			const heightT = THREE.MathUtils.clamp(
-				(positionAttribute.getY(index) + domeRadius) / (domeRadius * 2),
-				0,
-				1,
-			);
+			for (let index = 0; index < positionAttribute.count; index += 1) {
+				const heightT = THREE.MathUtils.clamp(
+					(positionAttribute.getY(index) + domeRadius) / (domeRadius * 2),
+					0,
+					1,
+				);
 
-			if (heightT < 0.45) {
-				domeColor.copy(bottomColor).lerp(horizonColor, heightT / 0.45);
-			} else {
-				domeColor
-					.copy(horizonColor)
-					.lerp(topColor, (heightT - 0.45) / 0.55);
+				if (heightT < 0.45) {
+					domeColor.copy(bottomColor).lerp(horizonColor, heightT / 0.45);
+				} else {
+					domeColor
+						.copy(horizonColor)
+						.lerp(topColor, (heightT - 0.45) / 0.55);
+				}
+
+				domeColors.push(domeColor.r, domeColor.g, domeColor.b);
 			}
 
-			domeColors.push(domeColor.r, domeColor.g, domeColor.b);
+			domeGeometry.setAttribute(
+				'color',
+				new THREE.Float32BufferAttribute(domeColors, 3),
+			);
+
+			const backdropDome = new THREE.Mesh(
+				domeGeometry,
+				new THREE.MeshBasicMaterial({
+					vertexColors: true,
+					side: THREE.BackSide,
+					fog: false,
+					depthWrite: false,
+				}),
+			);
+			backdropDome.name = 'MinimalSceneBackdropDome';
+			backdropDome.position.copy(floorCenter).add(new THREE.Vector3(0, 8, 0));
+			backdropDome.renderOrder = -1000;
+			scene.add(backdropDome);
+			updateMatrixRecursively(backdropDome);
 		}
+	}
 
-		domeGeometry.setAttribute(
-			'color',
-			new THREE.Float32BufferAttribute(domeColors, 3),
+	createMinimalSceneFloor(scene, splatGroundCenter) {
+		const groundSurfaceRadius = 12;
+		const floorDepth = 40;
+		const floorCenter = splatGroundCenter.clone();
+		const groundSurfaceGeometry = new THREE.CircleGeometry(
+			groundSurfaceRadius,
+			64,
 		);
-
-		const backdropDome = new THREE.Mesh(
-			domeGeometry,
-			new THREE.MeshBasicMaterial({
-				vertexColors: true,
-				side: THREE.BackSide,
-				fog: false,
-				depthWrite: false,
+		groundSurfaceGeometry.setAttribute(
+			'uv2',
+			new THREE.BufferAttribute(
+				groundSurfaceGeometry.attributes.uv.array.slice(),
+				2,
+			),
+		);
+		const groundColorMap = setupRepeatedTexture(
+			textureLoader.load(
+				`${MINIMAL_SCENE_GROUND_TEXTURE_ROOT}/forest_leaves_03_diff_2k.jpg`,
+			),
+			this.renderer,
+			true,
+		);
+		const groundArmMap = setupRepeatedTexture(
+			textureLoader.load(
+				`${MINIMAL_SCENE_GROUND_TEXTURE_ROOT}/forest_leaves_03_arm_2k.jpg`,
+			),
+			this.renderer,
+		);
+		const groundHeightMap = setupRepeatedTexture(
+			textureLoader.load(
+				`${MINIMAL_SCENE_GROUND_TEXTURE_ROOT}/forest_leaves_03_disp_2k.png`,
+			),
+			this.renderer,
+		);
+		const groundSurface = new THREE.Mesh(
+			groundSurfaceGeometry,
+			new THREE.MeshStandardMaterial({
+				map: groundColorMap,
+				aoMap: groundArmMap,
+				roughnessMap: groundArmMap,
+				metalnessMap: groundArmMap,
+				bumpMap: groundHeightMap,
+				bumpScale: 0.08,
+				roughness: 1,
+				metalness: 0.05,
+				aoMapIntensity: 0.75,
+				side: THREE.DoubleSide,
 			}),
 		);
-		backdropDome.name = 'MinimalSceneBackdropDome';
-		backdropDome.position.copy(floorCenter).add(new THREE.Vector3(0, 8, 0));
-		backdropDome.renderOrder = -1000;
-		scene.add(backdropDome);
-		updateMatrixRecursively(backdropDome);
-	}
+		groundSurface.name = 'MinimalSceneGroundSurface';
+		groundSurface.rotation.x = -Math.PI / 2;
+		groundSurface.position.copy(floorCenter).add(new THREE.Vector3(0, 0.02, 0));
+		groundSurface.receiveShadow = false;
+		groundSurface.castShadow = false;
+		scene.add(groundSurface);
+		updateMatrixRecursively(groundSurface);
 
-	createMinimalSceneGardenProps(scene, floorCenter, splatGroundCenter) {
-		const enclosureAssets = [
-			{
-				meshId: 'Prop_Fence_01_01',
-				offset: new THREE.Vector3(-6.2, 0, 6.2),
-				rotationY: 0,
-				scale: 1,
-			},
-			{
-				meshId: 'Prop_Fence_01_01',
-				offset: new THREE.Vector3(6.2, 0, 6.2),
-				rotationY: Math.PI,
-				scale: 1,
-			},
-		];
-		const boundaryTrees = [
-			{
-				meshId: 'PLANT_FIR',
-				offset: new THREE.Vector3(-8.2, 0, -2.3),
-				rotationY: THREE.MathUtils.degToRad(34),
-				scale: 1.55,
-			},
-			{
-				meshId: 'PLANT_FIR',
-				offset: new THREE.Vector3(-4.8, 0, -8.2),
-				rotationY: THREE.MathUtils.degToRad(20),
-				scale: 1.7,
-			},
-			{
-				meshId: 'PLANT_FIR',
-				offset: new THREE.Vector3(0.6, 0, -9.1),
-				rotationY: THREE.MathUtils.degToRad(-2),
-				scale: 1.85,
-			},
-			{
-				meshId: 'PLANT_FIR',
-				offset: new THREE.Vector3(5.3, 0, -7.7),
-				rotationY: THREE.MathUtils.degToRad(-24),
-				scale: 1.8,
-			},
-			{
-				meshId: 'PLANT_FIR',
-				offset: new THREE.Vector3(8.1, 0, -2.1),
-				rotationY: THREE.MathUtils.degToRad(-38),
-				scale: 1.58,
-			},
-		];
-
-		enclosureAssets.forEach(({ meshId, offset, rotationY, scale }) => {
-			this.createMinimalSceneAsset(
-				scene,
-				meshId,
-				floorCenter.clone().add(offset),
-				rotationY,
-				scale,
-			);
-		});
-
-		boundaryTrees.forEach(({ meshId, offset, rotationY, scale }) => {
-			this.createMinimalSceneAsset(
-				scene,
-				meshId,
-				splatGroundCenter.clone().add(offset),
-				rotationY,
-				scale,
-			);
-		});
-	}
-
-	createMinimalSceneFloor(scene, playerStart, splatGroundCenter) {
-		const floorDepth = 40;
-		const floorCenter = playerStart
-			.clone()
-			.lerp(splatGroundCenter, 0.5)
-			.add(new THREE.Vector3(0, 0, 1.5));
 		const floorMesh = new THREE.Mesh(
 			new THREE.BoxGeometry(24, 1, floorDepth),
 			new THREE.MeshPhongMaterial({
@@ -1023,11 +1045,26 @@ export class SceneCreationSystem extends System {
 		const splatGroundCenter = playerStart.clone().add(new THREE.Vector3(0, 0, -19.5));
 		const splatPosition = splatGroundCenter.clone().add(new THREE.Vector3(0, 0.8, 0));
 		this.createMinimalSceneBackdrop(scene, playerStart, floorCenter, splatGroundCenter);
-		this.createMinimalSceneGardenProps(scene, floorCenter, splatGroundCenter);
-		this.createMinimalSceneFloor(scene, playerStart, splatGroundCenter);
+		this.createMinimalSceneFloor(scene, splatGroundCenter);
 		this.createMinimalSceneSplat(scene, splatPosition);
 
-		const rabbitSpot = splatGroundCenter.clone().add(new THREE.Vector3(-0.9, 0, -0.6));
+		const rabbitSpots = [
+			new THREE.Vector3(-2.4, 0, -1.35),
+			new THREE.Vector3(2.35, 0, -1.05),
+		].map((offset) => ({
+			position: splatGroundCenter.clone().add(offset),
+			rotationY: Math.atan2(-offset.x, -offset.z),
+		}));
+		const rabbitIdleAnimations = [
+			{ name: 'Idle_01', loop: THREE.LoopRepeat },
+			{ name: 'Idle_Var_01', loop: THREE.LoopOnce },
+			{ name: 'Idle_Var_02', loop: THREE.LoopRepeat },
+			{ name: 'Idle_Var_03', loop: THREE.LoopOnce },
+			{ name: 'Idle_Var_04', loop: THREE.LoopOnce },
+		];
+		const rabbitEngagedAnimations = [
+			{ name: 'Engaged_01', loop: THREE.LoopRepeat },
+		];
 		const butterflyLeft = splatGroundCenter.clone().add(new THREE.Vector3(-0.55, 1.15, 0.15));
 		const butterflyRight = splatGroundCenter.clone().add(new THREE.Vector3(0.75, 1.2, -0.1));
 		const butterflyRear = splatGroundCenter.clone().add(new THREE.Vector3(0.2, 1.05, -0.7));
@@ -1051,21 +1088,17 @@ export class SceneCreationSystem extends System {
 				horizontalPathVariationFactor: Math.PI / 180,
 			},
 		).getMutableComponent(FaunaClusterComponent);
-		this.createMinimalStationaryFauna(
-			scene,
-			'FAUNA_RABBIT',
-			rabbitSpot,
-			Math.PI,
-			1,
-			[
-				{ name: 'Idle_01', loop: THREE.LoopRepeat },
-				{ name: 'Idle_Var_01', loop: THREE.LoopOnce },
-				{ name: 'Idle_Var_02', loop: THREE.LoopRepeat },
-				{ name: 'Idle_Var_03', loop: THREE.LoopOnce },
-				{ name: 'Idle_Var_04', loop: THREE.LoopOnce },
-			],
-			[{ name: 'Engaged_01', loop: THREE.LoopRepeat }],
-		);
+		rabbitSpots.forEach(({ position, rotationY }) => {
+			this.createMinimalStationaryFauna(
+				scene,
+				'FAUNA_RABBIT',
+				position,
+				rotationY,
+				1,
+				rabbitIdleAnimations,
+				rabbitEngagedAnimations,
+			);
+		});
 		this.createMinimalMovableFauna(
 			scene,
 			'FAUNA_BLUE_BUTTERFLY',

@@ -62,9 +62,10 @@ export const convertToVRButton = (renderer, button, callbacks = {}) => {
 	function showSendToVR() {
 		button.textContent = 'Send to headset';
 		button.onclick = () => {
+			const publishUrl = encodeURIComponent(window.location.href);
 			// instead of entering the garden, we show a link to the 'send to VR' URL.
 			window.open(
-				'https://www.oculus.com/open_url/?url=https%3A%2F%2Fflowerbed.metademolab.com',
+				`https://www.oculus.com/open_url/?url=${publishUrl}`,
 			);
 		};
 	}

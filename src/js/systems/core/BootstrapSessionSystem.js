@@ -18,6 +18,7 @@ import {
 import { SessionComponent } from '../../components/SessionComponent';
 import { System } from 'ecsy';
 import { THREEGlobalComponent } from '../../components/THREEGlobalComponent';
+import { getOnlyEntity } from '../../utils/entityUtils';
 
 export class BootstrapSessionSystem extends System {
 	init() {
@@ -38,6 +39,14 @@ export class BootstrapSessionSystem extends System {
 		document
 			.getElementById('app')
 			.addEventListener('fullscreenchange', (_event) => {
+				const sessionEntity = getOnlyEntity(this.queries.session, false);
+				const sessionState = sessionEntity?.getMutableComponent(SessionComponent);
+				if (!document.fullscreenElement && sessionState?.isExperienceOpened) {
+					sessionState.isExperienceOpened = false;
+					window.dispatchEvent(experienceEndedEvent);
+					return;
+				}
+
 				window.goFullScreen();
 			});
 	}

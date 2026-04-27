@@ -31,6 +31,7 @@ const _orientation = new THREE.Vector3();
 export class AudioSystem extends System {
 	init() {
 		this._missingAudioIds = new Set();
+		this._boundUnlockAudioContext = this._unlockAudioContext.bind(this);
 
 		const compressor = Howler.ctx.createDynamicsCompressor();
 
@@ -39,14 +40,6 @@ export class AudioSystem extends System {
 		compressor.connect(Howler.ctx.destination);
 
 		Howler.volume(0);
-
-		// don't play any sounds if we are not in WebXR.
-		window.addEventListener('experiencestart', () => {
-			this._setGlobalAudible(true);
-		});
-		window.addEventListener('experienceend', () => {
-			this._setGlobalAudible(false, true);
-		});
 
 		this._tweenValues = { volume: 0 };
 		this.fadeInTween = new TWEEN.Tween(this._tweenValues)
@@ -62,6 +55,8 @@ export class AudioSystem extends System {
 				Howler.volume(this._tweenValues.volume);
 			});
 
+		this._bindAudioUnlock();
+
 		this._setGlobalAudible(true);
 
 		// handle any looping sounds that were added before initialization
@@ -71,6 +66,40 @@ export class AudioSystem extends System {
 		this.queries.loopingSounds.results.forEach((entity) => {
 			this._initializeLoopingSound(entity, audioDatabase);
 		});
+	}
+
+	_bindAudioUnlock() {
+		['pointerdown', 'keydown', 'touchend'].forEach((eventName) => {
+			window.addEventListener(eventName, this._boundUnlockAudioContext, {
+				passive: true,
+			});
+		});
+
+		this._unlockAudioContext();
+	}
+
+	_removeAudioUnlockListeners() {
+		['pointerdown', 'keydown', 'touchend'].forEach((eventName) => {
+			window.removeEventListener(eventName, this._boundUnlockAudioContext);
+		});
+	}
+
+	_unlockAudioContext() {
+		if (!Howler.ctx || Howler.ctx.state === 'running') {
+			this._removeAudioUnlockListeners();
+			return;
+		}
+
+		Howler.ctx
+			.resume()
+			.then(() => {
+				if (Howler.ctx.state === 'running') {
+					this._removeAudioUnlockListeners();
+				}
+			})
+			.catch(() => {
+				// Keep the listeners alive so the next interaction can retry.
+			});
 	}
 
 	execute() {

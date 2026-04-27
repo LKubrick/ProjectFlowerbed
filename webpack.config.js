@@ -80,6 +80,12 @@ export default {
 		new CopyPlugin({
 			patterns: [
 				{ from: 'src/assets', to: 'assets' },
+				{
+					from: 'content/images/ground_textures',
+					to: 'assets/images/ground_textures',
+					noErrorOnMissing: true,
+				},
+				{ from: 'content/HDRI', to: 'assets/HDRI', noErrorOnMissing: true },
 				{ from: 'content/splats', to: 'assets/splats', noErrorOnMissing: true },
 				// Cloudflare Pages routing fallback (safe to include even if unused).
 				{ from: 'src/_redirects', to: '.', noErrorOnMissing: true },

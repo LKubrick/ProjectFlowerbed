@@ -186,6 +186,8 @@ export const AssetURLs = {
 
 		MUSIC_ARABESQUE: 'assets/audio/soundtrack/arabesque',
 		MUSIC_SPINDLE: 'assets/audio/soundtrack/spindle',
+		MUSIC_SPLAT_V2_A_KEYS_LEVEL2_M260312:
+			'assets/audio/soundtrack/v2_a_keys_level2_m260312.wav',
 	},
 	UI: {
 		SWITCH_OFF: 'assets/images/ui/switch_off.png',

@@ -148,6 +148,13 @@ export const getAudioMix = (assetUrl) => {
 		case AssetURLs.AUDIO.MUSIC_ARABESQUE:
 		case AssetURLs.AUDIO.MUSIC_SPINDLE:
 			volume = -33;
+			rolloff = 1.0;
+			maxDistance = 24;
+			break;
+		case AssetURLs.AUDIO.MUSIC_SPLAT_V2_A_KEYS_LEVEL2_M260312:
+			volume = -8;
+			rolloff = 1.35;
+			maxDistance = 22;
 			break;
 		default:
 			volume = -20;
